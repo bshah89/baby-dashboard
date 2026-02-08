@@ -1,0 +1,2 @@
+row_id,datetime,date,time,event_type,feed_method,side,volume_ml,duration_min,diaper_type,notes
+r1770511114974,2026-02-08 00:38,2026-02-08,00:38,diaper,,,,,mixed,

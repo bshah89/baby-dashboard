@@ -1,0 +1,791 @@
+import os
+import pandas as pd
+import streamlit as st
+from datetime import datetime, time, timedelta
+import gspread
+from google.oauth2.service_account import Credentials
+
+st.set_page_config(page_title="Baby Girl Care", page_icon="👶🏻", layout="wide")
+
+# -------------------------
+# Secrets expected
+# -------------------------
+# st.secrets["gsheets"]["spreadsheet_id"] = "..."
+# st.secrets["gsheets"]["worksheet_name"] = "Log"
+# st.secrets["gcp_service_account"] = { full service account json }
+
+EXPECTED_COLS = [
+    "row_id",
+    "datetime",
+    "date",
+    "time",
+    "event_type",
+    "feed_method",
+    "side",
+    "volume_ml",
+    "duration_min",
+    "diaper_type",
+    "notes",
+]
+
+FEED_METHODS = ["bottle", "breast"]
+SIDES = ["left", "right"]
+DIAPER_TYPES = ["wet", "dirty", "mixed"]
+
+
+# -------------------------
+# Safe helpers
+# -------------------------
+def is_missing(v) -> bool:
+    try:
+        return v is None or pd.isna(v)
+    except Exception:
+        return v is None
+
+def safe_str(v) -> str:
+    return "" if is_missing(v) else str(v)
+
+def safe_lower(v) -> str:
+    return safe_str(v).strip().lower()
+
+def safe_int(v, default=0) -> int:
+    try:
+        if is_missing(v):
+            return default
+        x = float(v)
+        if pd.isna(x):
+            return default
+        return int(x)
+    except Exception:
+        return default
+
+def now_floor_minute() -> datetime:
+    n = datetime.now()
+    return n.replace(second=0, microsecond=0)
+
+def new_row_id() -> str:
+    return f"r{int(datetime.now().timestamp() * 1000)}"
+
+def make_dt(d, t) -> datetime:
+    return datetime.combine(d, t)
+
+def time_ago_str(ts: pd.Timestamp) -> str:
+    if is_missing(ts):
+        return "Not yet"
+    mins = int((pd.Timestamp.now() - ts).total_seconds() // 60)
+    if mins < 1:
+        return "just now"
+    if mins < 60:
+        return f"{mins} min ago"
+    hrs = mins // 60
+    rem = mins % 60
+    if hrs < 24:
+        return f"{hrs}h {rem}m ago"
+    days = hrs // 24
+    hrs2 = hrs % 24
+    return f"{days}d {hrs2}h ago"
+
+def is_night(ts: pd.Timestamp, night_start: time, night_end: time) -> bool:
+    if is_missing(ts):
+        return False
+    tt = ts.time()
+    if night_start < night_end:
+        return night_start <= tt < night_end
+    return tt >= night_start or tt < night_end
+
+def last_night_window(now_dt: datetime, night_start_t: time, night_end_t: time):
+    today = now_dt.date()
+
+    if night_start_t < night_end_t:
+        end_dt = datetime.combine(today, night_end_t)
+        start_dt = datetime.combine(today, night_start_t)
+        if now_dt < end_dt:
+            end_dt = datetime.combine(today - timedelta(days=1), night_end_t)
+            start_dt = datetime.combine(today - timedelta(days=1), night_start_t)
+        return pd.Timestamp(start_dt), pd.Timestamp(end_dt)
+
+    end_dt = datetime.combine(today, night_end_t)
+    start_dt = datetime.combine(today - timedelta(days=1), night_start_t)
+    if now_dt < end_dt:
+        end_dt = datetime.combine(today - timedelta(days=1), night_end_t)
+        start_dt = datetime.combine(today - timedelta(days=2), night_start_t)
+    return pd.Timestamp(start_dt), pd.Timestamp(end_dt)
+
+def normalize_row(dt: datetime, event_type: str, feed_method="", side="", volume_ml=None, duration_min=None, diaper_type="", notes="", row_id=None):
+    rid = row_id or new_row_id()
+    d = dt.date()
+    return {
+        "row_id": rid,
+        "datetime": dt.strftime("%Y-%m-%d %H:%M"),
+        "date": d.strftime("%Y-%m-%d"),
+        "time": dt.strftime("%H:%M"),
+        "event_type": safe_lower(event_type),
+        "feed_method": safe_lower(feed_method),
+        "side": safe_lower(side),
+        "volume_ml": "" if volume_ml in [None, ""] else safe_int(volume_ml, 0),
+        "duration_min": "" if duration_min in [None, ""] else safe_int(duration_min, 0),
+        "diaper_type": safe_lower(diaper_type),
+        "notes": safe_str(notes),
+    }
+
+def timeline_label(row: pd.Series) -> str:
+    dt_str = row["datetime"].strftime("%H:%M") if "datetime" in row and not is_missing(row["datetime"]) else ""
+    et = safe_lower(row.get("event_type"))
+    fm = safe_lower(row.get("feed_method"))
+
+    if et == "feed":
+        if fm == "bottle":
+            return f"{dt_str} 🍼 Bottle {safe_int(row.get('volume_ml'), 0)} ml"
+        if fm == "breast":
+            mins = safe_int(row.get("duration_min"), 0)
+            side = safe_lower(row.get("side"))
+            side_txt = f" {side.title()}" if side in SIDES else ""
+            return f"{dt_str} 🤱 Breast {mins} min{side_txt}"
+        return f"{dt_str} 🍼 Feed"
+
+    if et == "diaper":
+        dtp = safe_lower(row.get("diaper_type"))
+        icon = "💩" if dtp in ["dirty", "mixed"] else "💧"
+        return f"{dt_str} {icon} {(dtp.title() if dtp else 'Diaper')}"
+
+    return f"{dt_str} Event"
+
+def gentle_insights(today_df: pd.DataFrame) -> list[str]:
+    msgs = []
+    feeds = today_df[today_df["event_type"] == "feed"].copy()
+    diapers = today_df[today_df["event_type"] == "diaper"].copy()
+    bottle = feeds[feeds["feed_method"] == "bottle"].copy()
+
+    if len(feeds) == 0:
+        return ["No feeds logged yet today."]
+
+    last_feed = feeds["datetime"].max()
+    mins = int((pd.Timestamp.now() - last_feed).total_seconds() // 60)
+
+    if mins >= 180:
+        msgs.append(f"It has been {mins // 60} hours since the last feed.")
+    elif mins >= 90:
+        msgs.append(f"It has been {mins} minutes since the last feed.")
+
+    if len(diapers) == 0:
+        msgs.append("No diapers logged yet today.")
+
+    if len(bottle) > 0:
+        msgs.append(f"Total bottle intake today: {int(bottle['volume_ml'].fillna(0).sum())} ml.")
+
+    return msgs[:6]
+
+
+# -------------------------
+# Google Sheets connection
+# -------------------------
+@st.cache_resource
+def get_worksheet():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scopes)
+    gc = gspread.authorize(creds)
+
+    spreadsheet_id = st.secrets["gsheets"]["spreadsheet_id"]
+    ws_name = st.secrets["gsheets"]["worksheet_name"]
+
+    sh = gc.open_by_key(spreadsheet_id)
+    ws = sh.worksheet(ws_name)
+    return ws
+
+def ws_read_all() -> pd.DataFrame:
+    ws = get_worksheet()
+    records = ws.get_all_records()  # list[dict]
+    df = pd.DataFrame(records)
+
+    for c in EXPECTED_COLS:
+        if c not in df.columns:
+            df[c] = pd.NA
+
+    # parse datetime
+    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+    df = df.dropna(subset=["datetime"]).copy()
+    df["date"] = df["datetime"].dt.date
+
+    df["volume_ml"] = pd.to_numeric(df["volume_ml"], errors="coerce")
+    df["duration_min"] = pd.to_numeric(df["duration_min"], errors="coerce")
+
+    for c in ["event_type", "feed_method", "side", "diaper_type"]:
+        df[c] = df[c].astype("string").str.strip().str.lower()
+    df["notes"] = df["notes"].astype("string").fillna("")
+
+    # row_id must exist
+    df["row_id"] = df["row_id"].astype("string").fillna("").astype(str)
+
+    return df.sort_values("datetime").reset_index(drop=True)
+
+def ws_append_row(row: dict) -> None:
+    ws = get_worksheet()
+    ws.append_row([row.get(c, "") for c in EXPECTED_COLS], value_input_option="USER_ENTERED")
+
+def ws_find_rownum_by_row_id(row_id: str) -> int | None:
+    # Finds row number in sheet (1-based, includes header)
+    ws = get_worksheet()
+    col_values = ws.col_values(1)  # assumes row_id is column A
+    # col_values[0] is header
+    for idx, v in enumerate(col_values[1:], start=2):
+        if str(v).strip() == str(row_id).strip():
+            return idx
+    return None
+
+def ws_update_row(row_id: str, row: dict) -> bool:
+    ws = get_worksheet()
+    rnum = ws_find_rownum_by_row_id(row_id)
+    if rnum is None:
+        return False
+    ws.update(f"A{rnum}:K{rnum}", [[row.get(c, "") for c in EXPECTED_COLS]])
+    return True
+
+def ws_delete_row(row_id: str) -> bool:
+    ws = get_worksheet()
+    rnum = ws_find_rownum_by_row_id(row_id)
+    if rnum is None:
+        return False
+    ws.delete_rows(rnum)
+    return True
+
+
+# -------------------------
+# Session state
+# -------------------------
+if "quick_ml_1" not in st.session_state:
+    st.session_state.quick_ml_1 = 60
+if "quick_ml_2" not in st.session_state:
+    st.session_state.quick_ml_2 = 90
+if "default_feed_method" not in st.session_state:
+    st.session_state.default_feed_method = "bottle"
+
+if "bf_timer_active" not in st.session_state:
+    st.session_state.bf_timer_active = False
+if "bf_segments" not in st.session_state:
+    st.session_state.bf_segments = []  # [{"side": "left/right", "start": datetime, "end": datetime|None}]
+
+
+# -------------------------
+# UI: Sidebar
+# -------------------------
+with st.sidebar:
+    st.header("Settings")
+    baby_name = st.text_input("Baby girl name", value="Baby Girl")
+
+    st.divider()
+    st.subheader("Filters")
+
+# Read sheet data
+df_all = ws_read_all()
+
+# Build filter controls after we know min max
+with st.sidebar:
+    if len(df_all) > 0:
+        min_date = df_all["date"].min()
+        max_date = df_all["date"].max()
+    else:
+        today = datetime.now().date()
+        min_date = today - timedelta(days=7)
+        max_date = today
+
+    date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    else:
+        start_date = end_date = date_range
+
+    show_feeds = st.checkbox("Show feeds", value=True)
+    show_diapers = st.checkbox("Show diapers", value=True)
+
+    only_bottle = st.checkbox("Bottle only", value=False)
+    ml_min, ml_max = st.slider("Bottle ml range", 0, 300, (0, 150))
+
+    night_start = st.time_input("Night starts", value=time(22, 0))
+    night_end = st.time_input("Night ends", value=time(6, 0))
+
+    st.caption("Backend: Google Sheet")
+
+# Apply filters for insights/history
+df = df_all.copy()
+if len(df) > 0:
+    df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+
+    allowed = []
+    if show_feeds:
+        allowed.append("feed")
+    if show_diapers:
+        allowed.append("diaper")
+    if allowed:
+        df = df[df["event_type"].isin(allowed)].copy()
+
+    if only_bottle:
+        df = df[(df["event_type"] == "feed") & (df["feed_method"] == "bottle")].copy()
+        v = df["volume_ml"].fillna(0)
+        df = df[(v >= ml_min) & (v <= ml_max)].copy()
+
+st.title(f"👶🏻 {baby_name} care board")
+st.caption("Your log is saved in Google Sheets so it syncs across iPhone and Mac.")
+
+tabs = st.tabs(["Today", "Log", "Insights", "History", "Data"])
+
+
+# -------------------------
+# Today
+# -------------------------
+with tabs[0]:
+    today_date = datetime.now().date()
+    today_df = df_all[df_all["date"] == today_date].copy() if len(df_all) else df_all.copy()
+
+    feeds_today = today_df[today_df["event_type"] == "feed"].copy()
+    diapers_today = today_df[today_df["event_type"] == "diaper"].copy()
+
+    last_feed_dt = feeds_today["datetime"].max() if len(feeds_today) else pd.NaT
+    last_diaper_dt = diapers_today["datetime"].max() if len(diapers_today) else pd.NaT
+
+    last_feed_label = "Not yet"
+    if len(feeds_today):
+        last_feed_label = timeline_label(feeds_today.sort_values("datetime").iloc[-1])
+
+    last_diaper_label = "Not yet"
+    if len(diapers_today):
+        last_diaper_label = timeline_label(diapers_today.sort_values("datetime").iloc[-1])
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.subheader("Right now")
+        st.metric("Time since last feed", time_ago_str(last_feed_dt))
+        st.caption(last_feed_label)
+
+    with c2:
+        st.subheader("Diaper")
+        st.metric("Time since last diaper", time_ago_str(last_diaper_dt))
+        st.caption(last_diaper_label)
+
+    with c3:
+        st.subheader("Today so far")
+        st.metric("Feeds", int(len(feeds_today)))
+        st.metric("Diapers", int(len(diapers_today)))
+
+    st.divider()
+
+    c4, c5 = st.columns(2)
+    with c4:
+        st.subheader("Gentle notes")
+        for m in gentle_insights(today_df):
+            st.write("• " + m)
+
+    with c5:
+        st.subheader("Night summary")
+        start_night, end_night = last_night_window(datetime.now(), night_start, night_end)
+        night_df = df_all[(df_all["datetime"] >= start_night) & (df_all["datetime"] < end_night)].copy()
+        night_feeds = night_df[night_df["event_type"] == "feed"].copy()
+        night_bottle = night_feeds[night_feeds["feed_method"] == "bottle"].copy()
+
+        st.metric("Night feeds last night", int(len(night_feeds)))
+        st.metric("Night bottle ml last night", int(night_bottle["volume_ml"].fillna(0).sum()))
+        st.caption(f"Window: {start_night.strftime('%a %H:%M')} to {end_night.strftime('%a %H:%M')}")
+
+    st.divider()
+    st.subheader("Today timeline")
+    if len(today_df) == 0:
+        st.caption("No events yet today. Use Log.")
+    else:
+        for _, r in today_df.sort_values("datetime").iterrows():
+            label = timeline_label(r)
+            notes = safe_str(r.get("notes")).strip()
+            st.markdown(f"**{label}**" + (f"  \n{notes}" if notes else ""))
+
+
+# -------------------------
+# Log
+# -------------------------
+with tabs[1]:
+    st.subheader("Quick actions")
+
+    qa1, qa2, qa3, qa4, qa5 = st.columns([1, 1, 1, 1, 1])
+    with qa1:
+        st.session_state.quick_ml_1 = st.number_input("Quick bottle 1", 0, 300, int(st.session_state.quick_ml_1), step=5)
+    with qa2:
+        st.session_state.quick_ml_2 = st.number_input("Quick bottle 2", 0, 300, int(st.session_state.quick_ml_2), step=5)
+    with qa3:
+        if st.button(f"🍼 Bottle {st.session_state.quick_ml_1} ml", use_container_width=True):
+            dt = now_floor_minute()
+            ws_append_row(normalize_row(dt, "feed", "bottle", "", st.session_state.quick_ml_1))
+            st.success("Saved")
+            st.cache_data.clear()
+            st.rerun()
+    with qa4:
+        if st.button(f"🍼 Bottle {st.session_state.quick_ml_2} ml", use_container_width=True):
+            dt = now_floor_minute()
+            ws_append_row(normalize_row(dt, "feed", "bottle", "", st.session_state.quick_ml_2))
+            st.success("Saved")
+            st.cache_data.clear()
+            st.rerun()
+    with qa5:
+        if st.button("💧 Wet diaper", use_container_width=True):
+            dt = now_floor_minute()
+            ws_append_row(normalize_row(dt, "diaper", diaper_type="wet"))
+            st.success("Saved")
+            st.cache_data.clear()
+            st.rerun()
+
+    qb1, qb2, qb3 = st.columns(3)
+    with qb1:
+        if st.button("💩 Dirty diaper", use_container_width=True):
+            dt = now_floor_minute()
+            ws_append_row(normalize_row(dt, "diaper", diaper_type="dirty"))
+            st.success("Saved")
+            st.cache_data.clear()
+            st.rerun()
+    with qb2:
+        if st.button("💩 Mixed diaper", use_container_width=True):
+            dt = now_floor_minute()
+            ws_append_row(normalize_row(dt, "diaper", diaper_type="mixed"))
+            st.success("Saved")
+            st.cache_data.clear()
+            st.rerun()
+    with qb3:
+        if st.button("🤱 Breast timer", use_container_width=True):
+            if not st.session_state.bf_timer_active:
+                start = now_floor_minute()
+                st.session_state.bf_timer_active = True
+                st.session_state.bf_segments = [{"side": "left", "start": start, "end": None}]
+                st.success("Timer started on left")
+            st.rerun()
+
+    st.divider()
+    st.subheader("Breast timer")
+
+    def end_current_segment():
+        if st.session_state.bf_segments and st.session_state.bf_segments[-1]["end"] is None:
+            st.session_state.bf_segments[-1]["end"] = now_floor_minute()
+
+    def start_new_segment(side_name: str):
+        st.session_state.bf_segments.append({"side": side_name, "start": now_floor_minute(), "end": None})
+
+    if st.session_state.bf_timer_active and st.session_state.bf_segments:
+        segs = st.session_state.bf_segments
+        start_dt = segs[0]["start"]
+        current_side = safe_lower(segs[-1]["side"]) or "left"
+        elapsed = int((datetime.now() - start_dt).total_seconds() // 60)
+
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Started", start_dt.strftime("%H:%M"))
+        t2.metric("Current side", current_side.title())
+        t3.metric("Elapsed", f"{elapsed} min")
+        t4.metric("Status", "Running")
+
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            if st.button("Switch to Left", use_container_width=True):
+                end_current_segment()
+                start_new_segment("left")
+                st.rerun()
+        with s2:
+            if st.button("Switch to Right", use_container_width=True):
+                end_current_segment()
+                start_new_segment("right")
+                st.rerun()
+        with s3:
+            if st.button("Stop timer", use_container_width=True):
+                end_current_segment()
+                st.session_state.bf_timer_active = False
+                st.rerun()
+
+    if st.session_state.bf_segments:
+        segs = st.session_state.bf_segments
+        rows = []
+        total_min = 0
+        for s in segs:
+            stt = s["start"]
+            end = s["end"] if s["end"] is not None else now_floor_minute()
+            mins = int((end - stt).total_seconds() // 60)
+            mins = max(mins, 0)
+            total_min += mins
+            rows.append({"side": s["side"], "start": stt.strftime("%H:%M"), "end": end.strftime("%H:%M"), "min": mins})
+
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=220)
+        st.metric("Total breast minutes", total_min)
+
+        timer_start_dt = segs[0]["start"]
+        timer_end_dt = segs[-1]["end"] if segs[-1]["end"] is not None else now_floor_minute()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Save breast feed from timer ✅", use_container_width=True, disabled=(total_min <= 0)):
+                breakdown = ", ".join([f"{r['side'][0].upper()}:{r['min']}m {r['start']}-{r['end']}" for r in rows])
+                notes = f"Timer {timer_start_dt.strftime('%H:%M')}–{timer_end_dt.strftime('%H:%M')} | {breakdown}"
+                ws_append_row(normalize_row(timer_start_dt, "feed", "breast", duration_min=total_min, notes=notes))
+                st.session_state.bf_segments = []
+                st.session_state.bf_timer_active = False
+                st.success("Saved")
+                st.cache_data.clear()
+                st.rerun()
+        with c2:
+            if st.button("Discard timer", use_container_width=True):
+                st.session_state.bf_segments = []
+                st.session_state.bf_timer_active = False
+                st.success("Discarded")
+                st.rerun()
+
+    st.divider()
+    st.subheader("Full log form")
+    with st.form("full_log_form", clear_on_submit=True):
+        n = now_floor_minute()
+        c1, c2 = st.columns(2)
+        with c1:
+            d = st.date_input("Date", value=n.date())
+        with c2:
+            t = st.time_input("Time", value=n.time())
+
+        event_type = st.radio("Event", ["feed", "diaper"], horizontal=True)
+
+        feed_method = ""
+        side = ""
+        volume_ml = None
+        duration_min = None
+        diaper_type = ""
+        notes = st.text_input("Notes (optional)")
+
+        if event_type == "feed":
+            feed_method = st.radio("Feed method", FEED_METHODS, horizontal=True, index=0)
+            if feed_method == "bottle":
+                volume_ml = st.number_input("Bottle amount ml", 0, 300, 60, step=5)
+            else:
+                side = st.radio("Side", SIDES, horizontal=True)
+                duration_min = st.number_input("Duration min", 0, 240, 15, step=1)
+        else:
+            diaper_type = st.radio("Diaper type", DIAPER_TYPES, horizontal=True)
+
+        submitted = st.form_submit_button("Save entry", use_container_width=True)
+
+    if submitted:
+        dt = make_dt(d, t)
+        ws_append_row(normalize_row(dt, event_type, feed_method, side, volume_ml, duration_min, diaper_type, notes))
+        st.success("Saved")
+        st.cache_data.clear()
+        st.rerun()
+
+
+# -------------------------
+# Insights
+# -------------------------
+with tabs[2]:
+    feeds = df[df["event_type"] == "feed"].copy() if len(df) else df.copy()
+    diapers = df[df["event_type"] == "diaper"].copy() if len(df) else df.copy()
+    bottle = feeds[feeds["feed_method"] == "bottle"].copy() if len(feeds) else feeds.copy()
+    breast = feeds[feeds["feed_method"] == "breast"].copy() if len(feeds) else feeds.copy()
+
+    total_bottle_ml = int(bottle["volume_ml"].fillna(0).sum()) if len(bottle) else 0
+    avg_bottle_ml = float(bottle["volume_ml"].dropna().mean()) if len(bottle) and bottle["volume_ml"].notna().any() else 0.0
+    breast_total_min = int(breast["duration_min"].fillna(0).sum()) if len(breast) else 0
+
+    last_feed_dt = feeds["datetime"].max() if len(feeds) else pd.NaT
+    since_last_feed_min = int((pd.Timestamp.now() - last_feed_dt).total_seconds() // 60) if not is_missing(last_feed_dt) else None
+
+    if len(bottle):
+        bottle2 = bottle.copy()
+        bottle2["is_night"] = bottle2["datetime"].apply(lambda x: is_night(x, night_start, night_end))
+        night_total_ml = int(bottle2[bottle2["is_night"]]["volume_ml"].fillna(0).sum())
+        day_total_ml = int(bottle2[~bottle2["is_night"]]["volume_ml"].fillna(0).sum())
+    else:
+        night_total_ml = 0
+        day_total_ml = 0
+
+    now_ts = pd.Timestamp.now()
+    window_start = now_ts - pd.Timedelta(hours=24)
+    feeds_24h = df_all[df_all["event_type"] == "feed"].copy()
+    feeds_24h = feeds_24h.dropna(subset=["datetime"]).sort_values("datetime")
+    feeds_24h = feeds_24h[feeds_24h["datetime"] >= window_start].copy()
+
+    if len(feeds_24h) == 0:
+        longest_gap_24h_min = 24 * 60
+    else:
+        times = pd.concat([pd.Series([window_start]), feeds_24h["datetime"], pd.Series([now_ts])], ignore_index=True).sort_values().reset_index(drop=True)
+        gaps = times.diff().dt.total_seconds().fillna(0) / 60
+        longest_gap_24h_min = int(gaps.max())
+
+    start_night, end_night = last_night_window(datetime.now(), night_start, night_end)
+    night_df = df_all[(df_all["datetime"] >= start_night) & (df_all["datetime"] < end_night)].copy()
+    night_feed_count = int(len(night_df[night_df["event_type"] == "feed"]))
+
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.metric("Feeds", int(len(feeds)))
+    k2.metric("Diapers", int(len(diapers)))
+    k3.metric("Bottle total ml", total_bottle_ml)
+    k4.metric("Breast total min", breast_total_min)
+    k5.metric("Since last feed min", since_last_feed_min if since_last_feed_min is not None else "-")
+
+    k6, k7, k8, k9 = st.columns(4)
+    k6.metric("Avg bottle ml", round(avg_bottle_ml, 1))
+    k7.metric("Night bottle ml", night_total_ml)
+    k8.metric("Day bottle ml", day_total_ml)
+    k9.metric("Longest stretch last 24h min", longest_gap_24h_min)
+
+    k10, k11 = st.columns(2)
+    k10.metric("Night feeds last night", night_feed_count)
+    k11.caption(f"Last night window: {start_night.strftime('%a %H:%M')} to {end_night.strftime('%a %H:%M')}")
+
+    st.divider()
+    st.subheader("Charts")
+
+    if len(df) == 0:
+        st.caption("No data in this filter window.")
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("Bottle ml per day")
+            if len(bottle):
+                daily_bottle = bottle.groupby("date")["volume_ml"].sum().reset_index().rename(columns={"date": "index"}).set_index("index")
+                st.line_chart(daily_bottle["volume_ml"])
+            else:
+                st.caption("No bottle data in this filter window.")
+        with c2:
+            st.caption("Feeds and diapers per day")
+            daily_feeds = feeds.groupby("date").size().rename("feeds").reset_index()
+            daily_diapers = diapers.groupby("date").size().rename("diapers").reset_index()
+            merged = pd.DataFrame({"date": sorted(df["date"].unique())})
+            merged = merged.merge(daily_feeds, on="date", how="left").merge(daily_diapers, on="date", how="left").fillna(0)
+            merged = merged.rename(columns={"date": "index"}).set_index("index")
+            st.line_chart(merged[["feeds", "diapers"]])
+
+        c3, c4 = st.columns(2)
+        with c3:
+            st.caption("Rolling 24 hour bottle intake")
+            if len(bottle):
+                b = bottle.dropna(subset=["datetime"]).sort_values("datetime").copy()
+                b["volume_ml"] = b["volume_ml"].fillna(0)
+                b = b.set_index("datetime")
+                rolling = b["volume_ml"].rolling("24H").sum()
+                st.line_chart(rolling)
+            else:
+                st.caption("No bottle data in this filter window.")
+        with c4:
+            st.caption("Daily summary table")
+            feeds_sorted = feeds.sort_values("datetime").copy()
+            if len(feeds_sorted):
+                feeds_sorted["prev_dt"] = feeds_sorted.groupby("date")["datetime"].shift(1)
+                feeds_sorted["gap_min"] = (feeds_sorted["datetime"] - feeds_sorted["prev_dt"]).dt.total_seconds() / 60
+                gap_daily = feeds_sorted.groupby("date")["gap_min"].max().reset_index().rename(columns={"gap_min": "longest_gap_min"})
+            else:
+                gap_daily = pd.DataFrame(columns=["date", "longest_gap_min"])
+
+            bottle_daily = bottle.groupby("date")["volume_ml"].sum().reset_index().rename(columns={"volume_ml": "bottle_ml"}) if len(bottle) else pd.DataFrame(columns=["date", "bottle_ml"])
+            breast_daily = breast.groupby("date")["duration_min"].sum().reset_index().rename(columns={"duration_min": "breast_min"}) if len(breast) else pd.DataFrame(columns=["date", "breast_min"])
+            feed_count = feeds.groupby("date").size().reset_index(name="feed_count") if len(feeds) else pd.DataFrame(columns=["date", "feed_count"])
+            diaper_count = diapers.groupby("date").size().reset_index(name="diaper_count") if len(diapers) else pd.DataFrame(columns=["date", "diaper_count"])
+
+            summary = pd.DataFrame({"date": sorted(df["date"].unique())})
+            summary = summary.merge(feed_count, on="date", how="left")
+            summary = summary.merge(diaper_count, on="date", how="left")
+            summary = summary.merge(bottle_daily, on="date", how="left")
+            summary = summary.merge(breast_daily, on="date", how="left")
+            summary = summary.merge(gap_daily, on="date", how="left")
+            summary = summary.fillna(0)
+
+            for c in ["feed_count", "diaper_count", "bottle_ml", "breast_min", "longest_gap_min"]:
+                if c in summary.columns:
+                    summary[c] = summary[c].round(0).astype(int)
+
+            st.dataframe(summary.sort_values("date", ascending=False), use_container_width=True)
+
+
+# -------------------------
+# History
+# -------------------------
+with tabs[3]:
+    st.subheader("Timeline")
+    if len(df) == 0:
+        st.caption("No data in this filter window.")
+    else:
+        days = sorted(df["date"].unique().tolist())
+        chosen_day = st.selectbox("Choose a day", days, index=len(days) - 1)
+        day_df = df[df["date"] == chosen_day].sort_values("datetime").copy()
+
+        for _, r in day_df.iterrows():
+            label = timeline_label(r)
+            notes = safe_str(r.get("notes")).strip()
+            st.markdown(f"**{label}**" + (f"  \n{notes}" if notes else ""))
+
+    st.divider()
+    st.subheader("Edit or delete an entry")
+
+    if len(df_all) == 0:
+        st.caption("No entries yet.")
+    else:
+        recent = df_all.sort_values("datetime", ascending=False).head(300).copy()
+        recent["pick_label"] = recent.apply(lambda x: f"{x['datetime'].strftime('%Y-%m-%d %H:%M')} | {timeline_label(x)}", axis=1)
+        selected = st.selectbox("Pick an entry", recent["pick_label"].tolist())
+        row = recent[recent["pick_label"] == selected].iloc[0]
+        rid = safe_str(row.get("row_id")).strip()
+
+        dt0 = row["datetime"].to_pydatetime()
+
+        with st.form("edit_any_form"):
+            c1, c2 = st.columns(2)
+            with c1:
+                ed = st.date_input("Date", value=dt0.date(), key="edit_any_d")
+            with c2:
+                et = st.time_input("Time", value=dt0.time().replace(second=0, microsecond=0), key="edit_any_t")
+
+            e_event = st.radio("Event", ["feed", "diaper"], horizontal=True, index=0 if safe_lower(row.get("event_type")) == "feed" else 1)
+
+            e_feed_method = ""
+            e_side = ""
+            e_volume = None
+            e_duration = None
+            e_diaper_type = ""
+            e_notes = st.text_input("Notes", value=safe_str(row.get("notes")))
+
+            if e_event == "feed":
+                fm_val = safe_lower(row.get("feed_method")) or "bottle"
+                e_feed_method = st.radio("Feed method", FEED_METHODS, horizontal=True, index=0 if fm_val != "breast" else 1)
+                if e_feed_method == "bottle":
+                    e_volume = st.number_input("Bottle amount ml", 0, 300, safe_int(row.get("volume_ml"), 0), step=5)
+                else:
+                    s0 = safe_lower(row.get("side")) or "left"
+                    e_side = st.radio("Side", SIDES, horizontal=True, index=0 if s0 != "right" else 1)
+                    e_duration = st.number_input("Duration min", 0, 240, safe_int(row.get("duration_min"), 0), step=1)
+            else:
+                dtp0 = safe_lower(row.get("diaper_type")) or "wet"
+                if dtp0 not in DIAPER_TYPES:
+                    dtp0 = "wet"
+                e_diaper_type = st.radio("Diaper type", DIAPER_TYPES, horizontal=True, index=DIAPER_TYPES.index(dtp0))
+
+            save_edit = st.form_submit_button("Save changes", use_container_width=True)
+
+        if save_edit:
+            new_dt = make_dt(ed, et)
+            updated = normalize_row(new_dt, e_event, e_feed_method, e_side, e_volume, e_duration, e_diaper_type, e_notes, row_id=rid)
+            ok = ws_update_row(rid, updated)
+            if ok:
+                st.success("Updated")
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("Could not update. Row id not found.")
+
+        if st.button("Delete this entry", use_container_width=True, type="secondary"):
+            ok = ws_delete_row(rid)
+            if ok:
+                st.success("Deleted")
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("Could not delete. Row id not found.")
+
+
+# -------------------------
+# Data
+# -------------------------
+with tabs[4]:
+    st.subheader("Raw data and export")
+    st.dataframe(df_all.sort_values("datetime", ascending=False), use_container_width=True, height=520)
+
+    csv_bytes = df_all.copy()
+    csv_bytes["datetime"] = csv_bytes["datetime"].dt.strftime("%Y-%m-%d %H:%M")
+    out = csv_bytes.to_csv(index=False).encode("utf-8")
+    st.download_button("Download CSV", data=out, file_name="baby_log.csv", mime="text/csv", use_container_width=True)
