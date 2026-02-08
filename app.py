@@ -1,20 +1,27 @@
 import pandas as pd
 import streamlit as st
-from datetime import datetime, time, timedelta
+from datetime import datetime, date, time, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
 
+# =========================================================
+# Page
+# =========================================================
 st.set_page_config(page_title="Baby Girl Care", page_icon="👶🏻", layout="wide")
 
-# ===============================
-# Simple 4-digit PIN protection
-# ===============================
+# =========================================================
+# 4-digit PIN protection (must be BEFORE any data loads)
+# Secrets required:
+# [app_security]
+# pin = "1234"
+# =========================================================
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+
 def pin_gate():
     st.title("🔒 Baby Dashboard")
-    st.caption("Enter 4-digit PIN to continue")
+    st.caption("Enter 4 digit PIN to continue")
 
     pin_input = st.text_input(
         "PIN",
@@ -24,7 +31,8 @@ def pin_gate():
     )
 
     if pin_input:
-        if pin_input == st.secrets["app_security"]["pin"]:
+        expected = str(st.secrets["app_security"]["pin"]).strip()
+        if pin_input.strip() == expected:
             st.session_state.authenticated = True
             st.success("Unlocked")
             st.rerun()
@@ -33,12 +41,14 @@ def pin_gate():
 
     st.stop()
 
+
 if not st.session_state.authenticated:
     pin_gate()
 
-
 # =========================================================
-# Constants and schema
+# Schema
+# IMPORTANT: Make sure your Google Sheet has these headers
+# Add weight_kg column at end if not already
 # =========================================================
 EXPECTED_COLS = [
     "row_id",
@@ -55,10 +65,10 @@ EXPECTED_COLS = [
     "weight_kg",
 ]
 
+EVENT_TYPES = ["feed", "diaper", "weight"]
 FEED_METHODS = ["bottle", "breast"]
 SIDES = ["left", "right"]
 DIAPER_TYPES = ["wet", "dirty", "mixed"]
-EVENT_TYPES = ["feed", "diaper", "weight"]
 
 DUPLICATE_GUARD_SECONDS = 15
 
@@ -110,7 +120,7 @@ def now_floor_minute() -> datetime:
     return n.replace(second=0, microsecond=0)
 
 
-def make_dt(d, t) -> datetime:
+def make_dt(d: date, t: time) -> datetime:
     return datetime.combine(d, t)
 
 
@@ -146,15 +156,6 @@ def part_of_day(ts: pd.Timestamp) -> str:
     if 17 <= h < 21:
         return "Evening"
     return "Night"
-
-
-def is_night(ts: pd.Timestamp, night_start: time, night_end: time) -> bool:
-    if is_missing(ts):
-        return False
-    tt = ts.time()
-    if night_start < night_end:
-        return night_start <= tt < night_end
-    return tt >= night_start or tt < night_end
 
 
 def last_night_window(now_dt: datetime, night_start_t: time, night_end_t: time):
@@ -196,7 +197,6 @@ def normalize_row(
     sd = safe_lower(side)
     dp = safe_lower(diaper_type)
 
-    # Clean based on event type
     if et != "feed":
         fm = ""
         sd = ""
@@ -244,29 +244,33 @@ def validate_row(row: dict) -> list[str]:
             mins = safe_float(row.get("duration_min"), 0)
             if mins is None or mins <= 0:
                 errs.append("Breast duration must be greater than 0.")
+
     if et == "diaper":
         dp = safe_lower(row.get("diaper_type"))
         if dp not in DIAPER_TYPES:
             errs.append("Choose wet, dirty, or mixed.")
+
     if et == "weight":
         w = safe_float(row.get("weight_kg"))
         if w is None or w <= 0:
             errs.append("Weight must be greater than 0.")
         if w > 30:
             errs.append("Weight looks too high. Please double check kg value.")
+
     return errs
 
 
 def timeline_label(row: pd.Series) -> str:
-    dt_str = row["datetime"].strftime("%H:%M") if "datetime" in row and not is_missing(row["datetime"]) else ""
+    dt_str = ""
+    if "datetime" in row and not is_missing(row["datetime"]):
+        dt_str = row["datetime"].strftime("%H:%M")
+
     et = safe_lower(row.get("event_type"))
     fm = safe_lower(row.get("feed_method"))
 
     if et == "weight":
         w = safe_float(row.get("weight_kg"))
-        if w is None:
-            return f"{dt_str} ⚖️ Weight"
-        return f"{dt_str} ⚖️ {w:.3f} kg"
+        return f"{dt_str} ⚖️ {w:.3f} kg" if w is not None else f"{dt_str} ⚖️ Weight"
 
     if et == "feed":
         if fm == "bottle":
@@ -281,39 +285,14 @@ def timeline_label(row: pd.Series) -> str:
     if et == "diaper":
         dtp = safe_lower(row.get("diaper_type"))
         icon = "💩" if dtp in ["dirty", "mixed"] else "💧"
-        return f"{dt_str} {icon} {(dtp.title() if dtp else 'Diaper')}"
+        label = dtp.title() if dtp else "Diaper"
+        return f"{dt_str} {icon} {label}"
 
     return f"{dt_str} Event"
 
 
-def gentle_insights(today_df: pd.DataFrame) -> list[str]:
-    msgs = []
-    feeds = today_df[today_df["event_type"] == "feed"].copy()
-    diapers = today_df[today_df["event_type"] == "diaper"].copy()
-    bottle = feeds[feeds["feed_method"] == "bottle"].copy()
-
-    if len(feeds) == 0:
-        return ["No feeds logged yet today."]
-
-    last_feed = feeds["datetime"].max()
-    mins = int((pd.Timestamp.now() - last_feed).total_seconds() // 60)
-
-    if mins >= 180:
-        msgs.append(f"It has been {mins // 60} hours since the last feed.")
-    elif mins >= 90:
-        msgs.append(f"It has been {mins} minutes since the last feed.")
-
-    if len(diapers) == 0:
-        msgs.append("No diapers logged yet today.")
-
-    if len(bottle) > 0:
-        msgs.append(f"Total bottle intake today: {int(bottle['volume_ml'].fillna(0).sum())} ml.")
-
-    return msgs[:6]
-
-
 # =========================================================
-# Insights helpers (peak, cluster, last 24h, suggested next feed)
+# Insights helpers
 # =========================================================
 def compute_feed_hour_hist(df_all: pd.DataFrame, days: int = 7) -> pd.DataFrame:
     if len(df_all) == 0:
@@ -365,6 +344,7 @@ def cluster_feeding_status(df_all: pd.DataFrame):
 
     if avg_gap is not None:
         return {"is_cluster": False, "msg": f"Recent feeding: {len(recent)} feeds in last 2h (avg gap {avg_gap:.0f} min)."}
+
     return {"is_cluster": False, "msg": "Recent feeding detected."}
 
 
@@ -419,7 +399,6 @@ def avg_feed_gap_minutes(df_all: pd.DataFrame, days: int = 7) -> float | None:
     gaps = gaps.dropna()
     if len(gaps) == 0:
         return None
-    # trim extreme outliers for calmer recommendation
     gaps = gaps[(gaps >= 10) & (gaps <= 360)]
     if len(gaps) == 0:
         return None
@@ -439,8 +418,40 @@ def suggested_next_feed_window(df_all: pd.DataFrame) -> tuple[str, str]:
     return (f"{start.strftime('%H:%M')} to {end.strftime('%H:%M')}", f"Based on ~{avg_gap:.0f} min average gap (last 7 days).")
 
 
+def gentle_insights(today_df: pd.DataFrame) -> list[str]:
+    msgs = []
+    feeds = today_df[today_df["event_type"] == "feed"].copy()
+    diapers = today_df[today_df["event_type"] == "diaper"].copy()
+    bottle = feeds[feeds["feed_method"] == "bottle"].copy()
+
+    if len(feeds) == 0:
+        return ["No feeds logged yet today."]
+
+    last_feed = feeds["datetime"].max()
+    mins = int((pd.Timestamp.now() - last_feed).total_seconds() // 60)
+
+    if mins >= 180:
+        msgs.append(f"It has been {mins // 60} hours since the last feed.")
+    elif mins >= 90:
+        msgs.append(f"It has been {mins} minutes since the last feed.")
+
+    if len(diapers) == 0:
+        msgs.append("No diapers logged yet today.")
+
+    if len(bottle) > 0:
+        msgs.append(f"Total bottle intake today: {int(bottle['volume_ml'].fillna(0).sum())} ml.")
+
+    return msgs[:6]
+
+
 # =========================================================
 # Google Sheets
+# Secrets required:
+# [gsheets]
+# spreadsheet_id = "..."
+# worksheet_name = "Log"
+#
+# [gcp_service_account]  (service account JSON as TOML object)
 # =========================================================
 def col_letter(n: int) -> str:
     s = ""
@@ -535,14 +546,11 @@ def ws_delete_row(row_id: str) -> bool:
 if "refresh_key" not in st.session_state:
     st.session_state.refresh_key = 0
 
-if "bf_timer_active" not in st.session_state:
-    st.session_state.bf_timer_active = False
-if "bf_segments" not in st.session_state:
-    st.session_state.bf_segments = []  # [{"side": "left/right", "start": dt, "end": dt|None}]
 if "last_saved_row_id" not in st.session_state:
     st.session_state.last_saved_row_id = ""
 if "last_saved_label" not in st.session_state:
     st.session_state.last_saved_label = ""
+
 if "last_action_key" not in st.session_state:
     st.session_state.last_action_key = ""
 if "last_action_at" not in st.session_state:
@@ -552,6 +560,11 @@ if "pending_duplicate" not in st.session_state:
 if "show_edit_last" not in st.session_state:
     st.session_state.show_edit_last = False
 
+if "bf_timer_active" not in st.session_state:
+    st.session_state.bf_timer_active = False
+if "bf_segments" not in st.session_state:
+    st.session_state.bf_segments = []  # [{"side": "left/right", "start": dt, "end": dt|None}]
+
 
 def refresh_data():
     st.session_state.refresh_key += 1
@@ -559,103 +572,6 @@ def refresh_data():
     st.rerun()
 
 
-# =========================================================
-# Sidebar settings + filters + refresh
-# =========================================================
-with st.sidebar:
-    if st.button("🔒 Lock app"):
-        st.session_state.authenticated = False
-        st.rerun()
-
-    st.header("Settings")
-    baby_name = st.text_input("Baby girl name", value="Baby Girl")
-
-    night_mode = st.toggle("Night mode", value=False)
-    if night_mode:
-        st.markdown(
-            """
-            ...
-            """,
-            unsafe_allow_html=True,
-        )
-<style>
-  .stApp { background: #0e1117; color: #e6e6e6; }
-  .stMarkdown, .stTextInput label, .stSelectbox label, .stRadio label, .stNumberInput label, .stDateInput label, .stTimeInput label { color: #e6e6e6 !important; }
-  div[data-testid="stMetricValue"] { color: #e6e6e6; }
-  div[data-testid="stMetricLabel"] { color: #bdbdbd; }
-</style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.divider()
-    st.subheader("Sync")
-    if st.button("🔄 Refresh", use_container_width=True):
-        refresh_data()
-    st.caption("Auto refresh every ~20 seconds. Use Refresh if you logged from another phone.")
-
-# Read data (cached)
-df_all = ws_read_all_cached(st.session_state.refresh_key)
-
-with st.sidebar:
-    st.divider()
-    st.subheader("Filters")
-
-    if len(df_all) > 0:
-        min_date = df_all["date"].min()
-        max_date = df_all["date"].max()
-    else:
-        today = datetime.now().date()
-        min_date = today - timedelta(days=7)
-        max_date = today
-
-    date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-    else:
-        start_date = end_date = date_range
-
-    show_feeds = st.checkbox("Show feeds", value=True)
-    show_diapers = st.checkbox("Show diapers", value=True)
-    show_weights = st.checkbox("Show weights", value=True)
-
-    only_bottle = st.checkbox("Bottle only", value=False)
-    ml_min, ml_max = st.slider("Bottle ml range", 0, 300, (0, 150))
-
-    night_start = st.time_input("Night starts", value=time(22, 0))
-    night_end = st.time_input("Night ends", value=time(6, 0))
-
-    st.caption("Backend: Google Sheet")
-
-# Filtered view for History charts
-df = df_all.copy()
-if len(df) > 0:
-    df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
-
-    allowed = []
-    if show_feeds:
-        allowed.append("feed")
-    if show_diapers:
-        allowed.append("diaper")
-    if show_weights:
-        allowed.append("weight")
-    if allowed:
-        df = df[df["event_type"].isin(allowed)].copy()
-
-    if only_bottle:
-        df = df[(df["event_type"] == "feed") & (df["feed_method"] == "bottle")].copy()
-        v = df["volume_ml"].fillna(0)
-        df = df[(v >= ml_min) & (v <= ml_max)].copy()
-
-st.title(f"👶🏻 {baby_name} care board")
-st.caption("Mobile first logging. Live sync across iPhone and Mac. Saved to Google Sheets.")
-
-tabs = st.tabs(["Today", "Log", "Insights", "Weight", "History", "Export", "Data"])
-
-
-# =========================================================
-# Write helpers with duplicate guard + friendly errors
-# =========================================================
 def duplicate_guard(action_key: str) -> bool:
     """Returns True if allowed to proceed. False if blocked by duplicate guard UI."""
     now = datetime.now()
@@ -665,10 +581,7 @@ def duplicate_guard(action_key: str) -> bool:
     if last_key == action_key and last_at is not None:
         elapsed = (now - last_at).total_seconds()
         if elapsed < DUPLICATE_GUARD_SECONDS:
-            st.session_state.pending_duplicate = {
-                "action_key": action_key,
-                "elapsed": elapsed,
-            }
+            st.session_state.pending_duplicate = {"action_key": action_key, "elapsed": elapsed}
             return False
 
     st.session_state.last_action_key = action_key
@@ -713,7 +626,95 @@ def undo_last():
 
 
 # =========================================================
-# TODAY TAB (more actionable)
+# Sidebar
+# =========================================================
+with st.sidebar:
+    if st.button("🔒 Lock app", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
+
+    st.divider()
+    st.subheader("Sync")
+    if st.button("🔄 Refresh", use_container_width=True):
+        refresh_data()
+    st.caption("Auto refresh every ~20 seconds. Use Refresh if another device logged.")
+
+    st.divider()
+    st.subheader("Settings")
+    baby_name = st.text_input("Baby girl name", value="Baby Girl")
+
+    night_mode = st.toggle("Night mode", value=False)
+    if night_mode:
+        css = """
+<style>
+  .stApp { background: #0e1117; color: #e6e6e6; }
+  .stMarkdown, .stTextInput label, .stSelectbox label, .stRadio label, .stNumberInput label, .stDateInput label, .stTimeInput label { color: #e6e6e6 !important; }
+  div[data-testid="stMetricValue"] { color: #e6e6e6; }
+  div[data-testid="stMetricLabel"] { color: #bdbdbd; }
+</style>
+"""
+        st.markdown(css, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("Filters")
+
+    # Load data AFTER sidebar controls exist (still fine)
+    df_all = ws_read_all_cached(st.session_state.refresh_key)
+
+    if len(df_all) > 0:
+        min_date = df_all["date"].min()
+        max_date = df_all["date"].max()
+    else:
+        today = datetime.now().date()
+        min_date = today - timedelta(days=7)
+        max_date = today
+
+    date_range = st.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+    else:
+        start_date = end_date = date_range
+
+    show_feeds = st.checkbox("Show feeds", value=True)
+    show_diapers = st.checkbox("Show diapers", value=True)
+    show_weights = st.checkbox("Show weights", value=True)
+
+    only_bottle = st.checkbox("Bottle only", value=False)
+    ml_min, ml_max = st.slider("Bottle ml range", 0, 300, (0, 150))
+
+    night_start = st.time_input("Night starts", value=time(22, 0))
+    night_end = st.time_input("Night ends", value=time(6, 0))
+
+    st.caption("Backend: Google Sheet")
+
+# Filtered view (for History / charts)
+df = df_all.copy()
+if len(df) > 0:
+    df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+    allowed = []
+    if show_feeds:
+        allowed.append("feed")
+    if show_diapers:
+        allowed.append("diaper")
+    if show_weights:
+        allowed.append("weight")
+    if allowed:
+        df = df[df["event_type"].isin(allowed)].copy()
+    if only_bottle:
+        df = df[(df["event_type"] == "feed") & (df["feed_method"] == "bottle")].copy()
+        v = df["volume_ml"].fillna(0)
+        df = df[(v >= ml_min) & (v <= ml_max)].copy()
+
+# =========================================================
+# Main UI
+# =========================================================
+st.title(f"👶🏻 {baby_name} care board")
+st.caption("Mobile first logging. Live sync across iPhone and Mac. Saved to Google Sheets.")
+
+tabs = st.tabs(["Today", "Log", "Insights", "Weight", "History", "Export", "Data"])
+
+# =========================================================
+# TODAY
 # =========================================================
 with tabs[0]:
     today_date = datetime.now().date()
@@ -721,33 +722,26 @@ with tabs[0]:
 
     feeds_today = today_df[today_df["event_type"] == "feed"].copy()
     diapers_today = today_df[today_df["event_type"] == "diaper"].copy()
-    weights_today = today_df[today_df["event_type"] == "weight"].copy()
 
     last_feed_dt = feeds_today["datetime"].max() if len(feeds_today) else pd.NaT
     last_diaper_dt = diapers_today["datetime"].max() if len(diapers_today) else pd.NaT
 
-    # Primary cards
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Time since last feed", time_ago_str(last_feed_dt))
-    with c2:
-        st.metric("Time since last diaper", time_ago_str(last_diaper_dt))
-    with c3:
-        st.metric("Feeds today", int(len(feeds_today)))
-    with c4:
-        st.metric("Diapers today", int(len(diapers_today)))
+    c1.metric("Time since last feed", time_ago_str(last_feed_dt))
+    c2.metric("Time since last diaper", time_ago_str(last_diaper_dt))
+    c3.metric("Feeds today", int(len(feeds_today)))
+    c4.metric("Diapers today", int(len(diapers_today)))
 
     st.divider()
 
-    # Next action hints
-    hint1, hint2, hint3 = st.columns(3)
-    with hint1:
-        window, note = suggested_next_feed_window(df_all)
+    a, b, c = st.columns(3)
+    with a:
         st.subheader("Suggested next feed")
+        window, note = suggested_next_feed_window(df_all)
         st.write(window)
         st.caption(note)
 
-    with hint2:
+    with b:
         st.subheader("Cluster check")
         status = cluster_feeding_status(df_all)
         if status["is_cluster"]:
@@ -755,15 +749,13 @@ with tabs[0]:
         else:
             st.info(status["msg"], icon="ℹ️")
 
-    with hint3:
+    with c:
         st.subheader("Quick notes")
         for m in gentle_insights(today_df):
             st.write("• " + m)
         st.caption("You are doing great 💗")
 
     st.divider()
-
-    # Last 6 events, big and readable
     st.subheader("Last events")
     last_events = df_all.sort_values("datetime", ascending=False).head(6).copy()
     if len(last_events) == 0:
@@ -774,7 +766,6 @@ with tabs[0]:
             notes = safe_str(r.get("notes")).strip()
             st.markdown(f"**{label}**" + (f"  \n{notes}" if notes else ""))
 
-    # Night summary (collapsible)
     st.divider()
     with st.expander("Night summary", expanded=False):
         start_night, end_night = last_night_window(datetime.now(), night_start, night_end)
@@ -784,15 +775,14 @@ with tabs[0]:
         night_bottle = night_feeds[night_feeds["feed_method"] == "bottle"].copy()
         night_breast = night_feeds[night_feeds["feed_method"] == "breast"].copy()
 
-        a, b, c = st.columns(3)
-        a.metric("Night feeds", int(len(night_feeds)))
-        b.metric("Night bottle ml", int(night_bottle["volume_ml"].fillna(0).sum()))
-        c.metric("Night breast min", int(night_breast["duration_min"].fillna(0).sum()))
+        x, y, z = st.columns(3)
+        x.metric("Night feeds", int(len(night_feeds)))
+        y.metric("Night bottle ml", int(night_bottle["volume_ml"].fillna(0).sum()))
+        z.metric("Night breast min", int(night_breast["duration_min"].fillna(0).sum()))
         st.caption(f"Window: {start_night.strftime('%a %H:%M')} to {end_night.strftime('%a %H:%M')}")
 
-
 # =========================================================
-# LOG TAB (one screen mobile app feel)
+# LOG
 # =========================================================
 with tabs[1]:
     st.subheader("Log now")
@@ -809,7 +799,6 @@ with tabs[1]:
         with cA:
             if st.button("Yes, log again", use_container_width=True):
                 st.session_state.pending_duplicate = None
-                # Allow next save by resetting last_action_at backward
                 st.session_state.last_action_at = datetime.now() - timedelta(seconds=DUPLICATE_GUARD_SECONDS + 1)
                 st.rerun()
         with cB:
@@ -817,7 +806,6 @@ with tabs[1]:
                 st.session_state.pending_duplicate = None
                 st.rerun()
 
-    # Pull last values
     feeds_all = df_all[df_all["event_type"] == "feed"].sort_values("datetime")
     diapers_all = df_all[df_all["event_type"] == "diaper"].sort_values("datetime")
 
@@ -838,7 +826,6 @@ with tabs[1]:
         last_diaper_type = safe_lower(r.get("diaper_type"))
         last_diaper_label = f"{r['datetime'].strftime('%H:%M')} {(last_diaper_type.title() if last_diaper_type else 'Diaper')}"
 
-    # Quick Log Card
     with st.container(border=True):
         st.markdown("### Quick Log")
         c1, c2 = st.columns(2)
@@ -850,8 +837,6 @@ with tabs[1]:
             st.write(last_diaper_label)
 
         st.write("")
-
-        # Buttons rows
         r1a, r1b, r1c = st.columns(3)
         with r1a:
             if st.button("🍼 15 ml", use_container_width=True):
@@ -903,7 +888,7 @@ with tabs[1]:
         if safe_str(st.session_state.last_saved_label).strip():
             st.caption(f"Last saved: {st.session_state.last_saved_label}")
 
-    # Edit last saved entry (simple, safe)
+    # Edit last saved entry
     if st.session_state.show_edit_last:
         rid = safe_str(st.session_state.last_saved_row_id).strip()
         match = df_all[df_all["row_id"] == rid].copy()
@@ -983,7 +968,7 @@ with tabs[1]:
                         st.error("Could not delete. Check internet and try again.")
                         st.caption(str(e))
 
-    # Breast timer (kept, but calmer)
+    # Breast timer
     st.divider()
     with st.container(border=True):
         st.markdown("### Breast timer")
@@ -1040,21 +1025,18 @@ with tabs[1]:
                     start_new_segment("right")
                     st.rerun()
 
-            # Compute segment table
             rows = []
             total_min = 0
             for s in segs:
                 stt = s["start"]
-                end = s["end"] if s["end"] is not None else now_floor_minute()
-                mins = int((end - stt).total_seconds() // 60)
+                endt = s["end"] if s["end"] is not None else now_floor_minute()
+                mins = int((endt - stt).total_seconds() // 60)
                 mins = max(mins, 0)
                 total_min += mins
-                rows.append({"side": s["side"], "start": stt.strftime("%H:%M"), "end": end.strftime("%H:%M"), "min": mins})
+                rows.append({"side": s["side"], "start": stt.strftime("%H:%M"), "end": endt.strftime("%H:%M"), "min": mins})
 
             st.metric("Total breast minutes", total_min)
-
-            show_segments = st.toggle("Show segment breakdown", value=False)
-            if show_segments:
+            if st.toggle("Show segment breakdown", value=False):
                 st.dataframe(pd.DataFrame(rows), use_container_width=True, height=200)
 
             timer_start_dt = segs[0]["start"]
@@ -1069,7 +1051,7 @@ with tabs[1]:
                     st.session_state.bf_segments = []
                     st.session_state.bf_timer_active = False
 
-    # Backdate + detailed logging (hidden)
+    # Backdate / details
     st.divider()
     with st.expander("Backdate or add details", expanded=False):
         st.caption("Use this only when you need a custom time, notes, or a non standard amount.")
@@ -1121,13 +1103,12 @@ with tabs[1]:
             )
             save_row(row, "Saved")
 
-
 # =========================================================
-# INSIGHTS TAB (calm layered collapsible)
+# INSIGHTS (layered + collapsible, calmer)
 # =========================================================
 with tabs[2]:
     st.subheader("Insights")
-    st.caption("A calm summary first. Details are tucked away.")
+    st.caption("Calm summary first. Details are tucked away.")
 
     with st.expander("Quick summary (Today + last 24h)", expanded=True):
         today_date = datetime.now().date()
@@ -1140,6 +1121,7 @@ with tabs[2]:
         now_ts = pd.Timestamp.now()
         last24_start = now_ts - pd.Timedelta(hours=24)
         last24 = df_all[(df_all["datetime"] >= last24_start) & (df_all["datetime"] <= now_ts)].copy()
+
         feeds_24 = last24[last24["event_type"] == "feed"].copy()
         diapers_24 = last24[last24["event_type"] == "diaper"].copy()
         bottle_24 = feeds_24[feeds_24["feed_method"] == "bottle"].copy()
@@ -1166,10 +1148,12 @@ with tabs[2]:
         else:
             st.caption("No events logged in the last 24 hours.")
 
-        show_table = st.toggle("Show last 24h table", value=False)
-        if show_table and len(last24):
-            view = last24.sort_values("datetime", ascending=False)[["datetime", "event_type", "feed_method", "volume_ml", "duration_min", "diaper_type", "weight_kg", "notes"]]
-            st.dataframe(view, use_container_width=True, height=320)
+        if st.toggle("Show last 24h table", value=False):
+            if len(last24):
+                view = last24.sort_values("datetime", ascending=False)[
+                    ["datetime", "event_type", "feed_method", "volume_ml", "duration_min", "diaper_type", "weight_kg", "notes"]
+                ]
+                st.dataframe(view, use_container_width=True, height=320)
 
     with st.expander("Weekly patterns (last 7 days)", expanded=False):
         hist = compute_feed_hour_hist(df_all, days=7)
@@ -1188,7 +1172,6 @@ with tabs[2]:
             st.caption("Feeds by hour (last 7 days)")
             st.bar_chart(hist.rename(columns={"hour": "index"}).set_index("index")["count"])
 
-        # Daily totals simplified
         cutoff = datetime.now().date() - timedelta(days=6)
         last7 = df_all[df_all["date"] >= cutoff].copy()
         if len(last7):
@@ -1206,6 +1189,7 @@ with tabs[2]:
 
             st.caption("Daily totals (feeds and diapers)")
             st.line_chart(daily[["feeds", "diapers"]])
+
             st.caption("Daily bottle ml")
             st.line_chart(daily[["bottle_ml"]])
         else:
@@ -1243,13 +1227,11 @@ with tabs[2]:
             st.caption("Night bottle ml")
             st.line_chart(night_df7["night_bottle_ml"])
 
-        show_night_table = st.toggle("Show night table", value=False)
-        if show_night_table:
+        if st.toggle("Show night table", value=False):
             st.dataframe(night_df7.reset_index(), use_container_width=True, height=280)
 
-
 # =========================================================
-# WEIGHT TAB (growth tracker)
+# WEIGHT
 # =========================================================
 with tabs[3]:
     st.subheader("Weight")
@@ -1259,7 +1241,6 @@ with tabs[3]:
     weights = weights.dropna(subset=["weight_kg"]).copy()
     weights = weights.sort_values("datetime")
 
-    # iPhone friendly quick add
     with st.container(border=True):
         st.markdown("### Add weight")
         c1, c2 = st.columns(2)
@@ -1283,7 +1264,6 @@ with tabs[3]:
                     row = normalize_row(make_dt(d, tt), "weight", weight_kg=w)
                     save_row(row, "Weight saved")
         with cB:
-            # Convenience birth weight logger (persists, no extra settings needed)
             with st.popover("Add birth weight"):
                 st.caption("This logs a weight entry tagged as birth weight.")
                 bd = st.date_input("Birth date", value=datetime.now().date(), key="bw_d")
@@ -1295,7 +1275,6 @@ with tabs[3]:
                         save_row(row, "Birth weight saved")
 
     st.divider()
-
     if len(weights) == 0:
         st.info("No weight entries yet.")
     else:
@@ -1309,7 +1288,6 @@ with tabs[3]:
         if len(last_14) >= 2:
             delta_14 = float(last_14.iloc[-1]["weight_kg"]) - float(last_14.iloc[0]["weight_kg"])
 
-        # Birth weight detection
         birth = weights[weights["notes"].astype("string").str.lower().str.contains("birth weight", na=False)].copy()
         birth_delta = None
         if len(birth):
@@ -1322,29 +1300,24 @@ with tabs[3]:
         k3.metric("Change (14 days)", f"{delta_14:.3f} kg" if delta_14 is not None else "Not enough data")
         k4.metric("Change since birth", f"{birth_delta:.3f} kg" if birth_delta is not None else "Add birth weight")
 
-        # Chart with gentle smoothing (weekly average)
         chart = weights[["datetime", "weight_kg"]].copy()
         chart["date"] = chart["datetime"].dt.date
         daily = chart.groupby("date")["weight_kg"].mean().reset_index()
         daily = daily.rename(columns={"date": "index"}).set_index("index")
         daily.index = pd.to_datetime(daily.index)
         daily = daily.sort_index()
-
-        # Smooth: 7 day rolling average if enough points
         smooth = daily.copy()
         smooth["rolling_7d"] = smooth["weight_kg"].rolling(window=7, min_periods=1).mean()
 
-        st.caption("Growth chart (daily)")
+        st.caption("Growth chart (daily + 7 day rolling average)")
         st.line_chart(smooth[["weight_kg", "rolling_7d"]])
 
-        show_table = st.toggle("Show weight table", value=False)
-        if show_table:
+        if st.toggle("Show weight table", value=False):
             show = weights.sort_values("datetime", ascending=False)[["datetime", "weight_kg", "notes", "row_id"]]
             st.dataframe(show, use_container_width=True, height=320)
 
-
 # =========================================================
-# HISTORY TAB (filters + day summary + grouped timeline)
+# HISTORY
 # =========================================================
 with tabs[4]:
     st.subheader("History")
@@ -1353,24 +1326,22 @@ with tabs[4]:
     if len(df_all) == 0:
         st.caption("No entries yet.")
     else:
-        # Local filters for History (in addition to sidebar)
         hf1, hf2, hf3 = st.columns(3)
         with hf1:
             type_filter = st.multiselect("Event types", EVENT_TYPES, default=EVENT_TYPES)
         with hf2:
             history_day = st.date_input("Day", value=datetime.now().date())
         with hf3:
-            show_grouped = st.checkbox("Group by morning/afternoon/evening/night", value=True)
+            show_grouped = st.checkbox("Group by morning, afternoon, evening, night", value=True)
 
         day_df = df_all[df_all["date"] == history_day].copy()
         if type_filter:
             day_df = day_df[day_df["event_type"].isin(type_filter)].copy()
         day_df = day_df.sort_values("datetime")
 
-        # Day summary row
         feeds = day_df[day_df["event_type"] == "feed"].copy()
         diapers = day_df[day_df["event_type"] == "diaper"].copy()
-        weights = day_df[day_df["event_type"] == "weight"].copy()
+        weights2 = day_df[day_df["event_type"] == "weight"].copy()
         bottle = feeds[feeds["feed_method"] == "bottle"].copy()
         breast = feeds[feeds["feed_method"] == "breast"].copy()
 
@@ -1379,15 +1350,15 @@ with tabs[4]:
         s2.metric("Diapers", int(len(diapers)))
         s3.metric("Bottle ml", int(bottle["volume_ml"].fillna(0).sum()) if len(bottle) else 0)
         s4.metric("Breast min", int(breast["duration_min"].fillna(0).sum()) if len(breast) else 0)
-        s5.metric("Weights", int(len(weights)))
+        s5.metric("Weights", int(len(weights2)))
 
         st.divider()
 
-        # Timeline
         if len(day_df) == 0:
             st.caption("No events for this day.")
         else:
             if show_grouped:
+                day_df = day_df.copy()
                 day_df["pod"] = day_df["datetime"].apply(part_of_day)
                 for pod in ["Morning", "Afternoon", "Evening", "Night"]:
                     block = day_df[day_df["pod"] == pod]
@@ -1405,8 +1376,6 @@ with tabs[4]:
                     st.markdown(f"**{label}**" + (f"  \n{notes}" if notes else ""))
 
         st.divider()
-
-        # Edit or delete
         st.markdown("### Edit or delete an entry")
         st.caption("Delete cannot be undone.")
 
@@ -1419,7 +1388,6 @@ with tabs[4]:
         row = recent[recent["pick_label"] == selected].iloc[0]
         rid = safe_str(row.get("row_id")).strip()
         dt0 = row["datetime"].to_pydatetime()
-
         et0 = safe_lower(row.get("event_type")) or "feed"
         if et0 not in EVENT_TYPES:
             et0 = "feed"
@@ -1434,7 +1402,6 @@ with tabs[4]:
             e_event = st.radio("Event", EVENT_TYPES, horizontal=True, index=EVENT_TYPES.index(et0))
             e_notes = st.text_input("Notes", value=safe_str(row.get("notes")))
 
-            # Fields per type
             e_feed_method = ""
             e_side = ""
             e_volume = None
@@ -1505,9 +1472,8 @@ with tabs[4]:
                 st.error("Could not delete. Check internet and try again.")
                 st.caption(str(e))
 
-
 # =========================================================
-# EXPORT TAB
+# EXPORT
 # =========================================================
 with tabs[5]:
     st.subheader("Export")
@@ -1518,6 +1484,7 @@ with tabs[5]:
     else:
         min_d = df_all["date"].min()
         max_d = df_all["date"].max()
+
         export_range = st.date_input("Export range", value=(min_d, max_d), min_value=min_d, max_value=max_d)
         if isinstance(export_range, tuple) and len(export_range) == 2:
             ex_start, ex_end = export_range
@@ -1539,9 +1506,8 @@ with tabs[5]:
             use_container_width=True,
         )
 
-
 # =========================================================
-# DATA TAB
+# DATA
 # =========================================================
 with tabs[6]:
     st.subheader("Raw data and backup")
@@ -1549,9 +1515,9 @@ with tabs[6]:
 
     st.dataframe(df_all.sort_values("datetime", ascending=False), use_container_width=True, height=520)
 
-    csv_bytes = df_all.copy()
-    csv_bytes["datetime"] = csv_bytes["datetime"].dt.strftime("%Y-%m-%d %H:%M")
-    out = csv_bytes[EXPECTED_COLS].to_csv(index=False).encode("utf-8")
+    csv_all = df_all.copy()
+    csv_all["datetime"] = csv_all["datetime"].dt.strftime("%Y-%m-%d %H:%M")
+    out = csv_all[EXPECTED_COLS].to_csv(index=False).encode("utf-8")
 
     st.download_button(
         "Download full CSV backup",
