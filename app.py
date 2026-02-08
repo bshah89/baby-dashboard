@@ -6,6 +6,37 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Baby Girl Care", page_icon="👶🏻", layout="wide")
 
+# ===============================
+# Simple 4-digit PIN protection
+# ===============================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+def pin_gate():
+    st.title("🔒 Baby Dashboard")
+    st.caption("Enter 4-digit PIN to continue")
+
+    pin_input = st.text_input(
+        "PIN",
+        type="password",
+        max_chars=4,
+        placeholder="••••",
+    )
+
+    if pin_input:
+        if pin_input == st.secrets["app_security"]["pin"]:
+            st.session_state.authenticated = True
+            st.success("Unlocked")
+            st.rerun()
+        else:
+            st.error("Incorrect PIN")
+
+    st.stop()
+
+if not st.session_state.authenticated:
+    pin_gate()
+
+
 # =========================================================
 # Constants and schema
 # =========================================================
@@ -532,6 +563,10 @@ def refresh_data():
 # Sidebar settings + filters + refresh
 # =========================================================
 with st.sidebar:
+    if st.button("🔒 Lock app"):
+        st.session_state.authenticated = False
+        st.rerun()
+
     st.header("Settings")
     baby_name = st.text_input("Baby girl name", value="Baby Girl")
 
@@ -539,6 +574,10 @@ with st.sidebar:
     if night_mode:
         st.markdown(
             """
+            ...
+            """,
+            unsafe_allow_html=True,
+        )
 <style>
   .stApp { background: #0e1117; color: #e6e6e6; }
   .stMarkdown, .stTextInput label, .stSelectbox label, .stRadio label, .stNumberInput label, .stDateInput label, .stTimeInput label { color: #e6e6e6 !important; }
