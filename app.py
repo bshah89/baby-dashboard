@@ -14,7 +14,7 @@ st.set_page_config(page_title="New Parent Hub", page_icon="👶🏻", layout="wi
 
 
 # =========================================================
-# 4 digit PIN lock gate
+# PIN lock gate
 # Secrets required
 # [app_security]
 # pin = "1234"
@@ -24,10 +24,11 @@ if "authenticated" not in st.session_state:
 
 
 def pin_gate():
-    st.markdown("<div class='container'>", unsafe_allow_html=True)
-    st.markdown("## 🔒 Baby Hub")
-    st.caption("Enter 4 digit PIN to continue")
-    pin_input = st.text_input("PIN", type="password", max_chars=4, placeholder="••••")
+    st.markdown("<div class='hub'>", unsafe_allow_html=True)
+    st.markdown("<div class='appTitle'>🔒 Baby Hub</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtle'>Enter 4 digit PIN to continue</div>", unsafe_allow_html=True)
+
+    pin_input = st.text_input("PIN", type="password", max_chars=4, placeholder="••••", key="pin_input")
     if pin_input:
         expected = str(st.secrets["app_security"]["pin"]).strip()
         if pin_input.strip() == expected:
@@ -36,6 +37,7 @@ def pin_gate():
             st.rerun()
         else:
             st.error("Incorrect PIN")
+
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
@@ -45,78 +47,160 @@ if not st.session_state.authenticated:
 
 
 # =========================================================
-# Style, mobile first
+# Theme
 # =========================================================
 CSS = """
 <style>
-  .container {
-    max-width: 460px;
-    margin: 0 auto;
-    padding-bottom: 120px;
-  }
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Quicksand:wght@400;500;600;700&display=swap');
 
-  .title {
-    font-size: 30px;
-    font-weight: 900;
-    letter-spacing: -0.02em;
-    margin-bottom: 6px;
-  }
+:root{
+  --bg: hsl(30 50% 98%);
+  --fg: hsl(280 30% 20%);
+  --card: hsl(0 0% 100%);
+  --border: hsl(280 15% 88%);
+  --muted: hsl(30 30% 94%);
 
-  .subtle { color: rgba(0,0,0,0.55); font-size: 13px; line-height: 1.35; }
-  @media (prefers-color-scheme: dark) {
-    .subtle { color: rgba(255,255,255,0.65); }
-  }
+  --pink: hsl(340 70% 65%);
+  --blue: hsl(200 70% 75%);
+  --yellow: hsl(45 90% 70%);
+  --mint: hsl(160 50% 70%);
+  --lav: hsl(270 50% 78%);
+  --peach: hsl(20 80% 78%);
+}
 
-  .card {
-    border: 1px solid rgba(0,0,0,0.08);
-    border-radius: 18px;
-    padding: 14px 14px;
-    background: rgba(255,255,255,0.72);
-    box-shadow: 0 10px 24px rgba(0,0,0,0.06);
-    margin-bottom: 12px;
-  }
-  @media (prefers-color-scheme: dark) {
-    .card {
-      border: 1px solid rgba(255,255,255,0.10);
-      background: rgba(20,20,22,0.55);
-      box-shadow: 0 10px 24px rgba(0,0,0,0.35);
-    }
-  }
+html, body, [data-testid="stAppViewContainer"] {
+  background: var(--bg) !important;
+  color: var(--fg) !important;
+  font-family: Nunito, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
 
-  .kpiGrid2 {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0,1fr));
-    gap: 10px;
-  }
+[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="stSidebar"] { display:none; }
 
-  .kpiGrid3 {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0,1fr));
-    gap: 10px;
-  }
+.hub{
+  max-width: 460px;
+  margin: 0 auto;
+  padding-bottom: 140px;
+}
 
-  .kpi {
-    border-radius: 18px;
-    padding: 12px 12px;
-    background: rgba(0,0,0,0.03);
-    border: 1px solid rgba(0,0,0,0.06);
-  }
-  @media (prefers-color-scheme: dark) {
-    .kpi {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.10);
-    }
-  }
+.appTitle{
+  font-family: Quicksand, Nunito, sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 6px 0 2px 0;
+}
 
-  .kpiLabel { font-size: 12px; opacity: 0.78; font-weight: 800; }
-  .kpiValue { font-size: 20px; font-weight: 950; margin-top: 2px; }
+.subtle{
+  color: rgba(40, 20, 55, 0.62);
+  font-size: 13px;
+  line-height: 1.35;
+}
 
-  div[data-baseweb="input"] > div { border-radius: 14px !important; }
-  button { border-radius: 16px !important; }
+.card{
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px 14px;
+  background: var(--card);
+  box-shadow: 0 10px 24px rgba(30, 10, 40, 0.06);
+  margin-bottom: 12px;
+}
 
-  /* Slightly reduce top padding for mobile feel */
-  section.main > div { padding-top: 18px; }
+.badgeRow{
+  display:flex;
+  gap:8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
 
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.badge.pink{ background: hsl(340 70% 95%); border-color: hsl(340 70% 85%); }
+.badge.blue{ background: hsl(200 70% 94%); border-color: hsl(200 70% 84%); }
+.badge.yellow{ background: hsl(45 90% 94%); border-color: hsl(45 90% 82%); }
+.badge.mint{ background: hsl(160 50% 92%); border-color: hsl(160 50% 80%); }
+.badge.lav{ background: hsl(270 50% 94%); border-color: hsl(270 50% 84%); }
+.badge.peach{ background: hsl(20 80% 94%); border-color: hsl(20 80% 84%); }
+
+.kpiGrid2{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap:10px;
+}
+
+.kpi{
+  border-radius: 18px;
+  padding: 12px 12px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.kpiLabel{ font-size: 12px; opacity: 0.78; font-weight: 800; }
+.kpiValue{ font-size: 20px; font-weight: 950; margin-top: 2px; }
+
+div[data-baseweb="input"] > div, div[data-baseweb="select"] > div { border-radius: 14px !important; }
+
+button{
+  border-radius: 16px !important;
+  font-weight: 800 !important;
+}
+
+button[kind="primary"]{
+  background: var(--pink) !important;
+  border: 1px solid hsl(340 70% 55%) !important;
+}
+button[kind="primary"]:hover{ filter: brightness(0.97); }
+
+/* bottom nav */
+.bottomNav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 12px 14px 12px;
+  background: rgba(255, 248, 242, 0.92);
+  border-top: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  z-index: 9999;
+}
+
+.bottomNavInner{
+  max-width: 460px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0,1fr));
+  gap: 8px;
+}
+
+.navItem{
+  text-decoration: none !important;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 16px;
+  padding: 10px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-weight: 900;
+  color: var(--fg) !important;
+  font-size: 12px;
+}
+
+.navItemActive{
+  background: hsl(340 70% 95%);
+  border-color: hsl(340 70% 80%);
+}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -245,6 +329,44 @@ def kpi_block(label: str, value: str):
 
 
 # =========================================================
+# Query param routing
+# =========================================================
+NAV_TABS = ["Home", "Feed", "Diaper", "Insights", "More"]
+DEFAULT_TAB = "Home"
+
+
+def qp_get(name: str, default: str = "") -> str:
+    # Supports new and old Streamlit APIs
+    try:
+        qp = st.query_params
+        val = qp.get(name, default)
+        if isinstance(val, list):
+            val = val[0] if val else default
+        return str(val) if val is not None else default
+    except Exception:
+        qp = st.experimental_get_query_params()
+        val = qp.get(name, [default])
+        return str(val[0]) if val else default
+
+
+def qp_set(**kwargs):
+    try:
+        for k, v in kwargs.items():
+            st.query_params[k] = v
+    except Exception:
+        st.experimental_set_query_params(**kwargs)
+
+
+nav = qp_get("tab", DEFAULT_TAB)
+if nav not in NAV_TABS:
+    nav = DEFAULT_TAB
+
+more_section = qp_get("section", "Main")
+if more_section not in ["Main", "Growth", "History"]:
+    more_section = "Main"
+
+
+# =========================================================
 # Google Sheets
 # =========================================================
 LOG_REQUIRED_COLS = [
@@ -265,8 +387,7 @@ LOG_REQUIRED_COLS = [
     "title",
     "data_json",
 ]
-
-CONFIG_SHEET = "Config"  # key, value
+CONFIG_SHEET = "Config"
 
 
 @st.cache_resource
@@ -307,13 +428,15 @@ def get_or_create_config_ws():
     except Exception:
         ws = sh.add_worksheet(title=CONFIG_SHEET, rows=50, cols=2)
         ws.update("A1:B1", [["key", "value"]])
-        ws.update("A2:B6", [
-            ["baby_name", "Baby Girl"],
-            ["baby_dob", ""],
-            ["night_start", "22:00"],
-            ["night_end", "06:00"],
-        ])
-    # ensure header
+        ws.update(
+            "A2:B6",
+            [
+                ["baby_name", "Baby Girl"],
+                ["baby_dob", ""],
+                ["night_start", "22:00"],
+                ["night_end", "06:00"],
+            ],
+        )
     hv = ws.row_values(1)
     if not hv or [x.strip().lower() for x in hv[:2]] != ["key", "value"]:
         ws.update("A1:B1", [["key", "value"]])
@@ -338,7 +461,6 @@ def load_config(_rk: int) -> dict:
 def save_config_value(key: str, value: str) -> None:
     ws = get_or_create_config_ws()
     rows = ws.get_all_values()
-    # find row
     target_row = None
     for i, r in enumerate(rows[1:], start=2):
         if len(r) >= 1 and str(r[0]).strip() == key:
@@ -373,10 +495,8 @@ def ws_read_log(_rk: int) -> pd.DataFrame:
     for c in ["event_type", "feed_method", "side", "diaper_type"]:
         df[c] = df[c].astype("string").str.strip().str.lower()
 
-    df["row_id"] = df["row_id"].astype("string").fillna("").astype(str)
-    df["notes"] = df["notes"].astype("string").fillna("")
-    df["title"] = df["title"].astype("string").fillna("")
-    df["mood"] = df["mood"].astype("string").fillna("")
+    for c in ["row_id", "notes", "title", "mood"]:
+        df[c] = df[c].astype("string").fillna("").astype(str)
 
     return df.sort_values("datetime").reset_index(drop=True)
 
@@ -392,10 +512,7 @@ def find_rownum_by_row_id(rid: str) -> int | None:
     headers = ws_headers(ws)
     if not headers:
         return None
-    try:
-        col_idx = headers.index("row_id") + 1
-    except ValueError:
-        col_idx = 1
+    col_idx = headers.index("row_id") + 1 if "row_id" in headers else 1
     col_values = ws.col_values(col_idx)
     for i, v in enumerate(col_values[1:], start=2):
         if str(v).strip() == str(rid).strip():
@@ -424,9 +541,6 @@ def ws_delete_log(rid: str) -> bool:
     return True
 
 
-# =========================================================
-# Row builder
-# =========================================================
 def base_row(dt: datetime) -> dict:
     return {
         "row_id": new_row_id(),
@@ -448,32 +562,25 @@ def base_row(dt: datetime) -> dict:
     }
 
 
-def refresh():
-    st.session_state.refresh_key += 1
-    st.cache_data.clear()
-    st.rerun()
-
-
-# =========================================================
-# State
-# =========================================================
 if "refresh_key" not in st.session_state:
     st.session_state.refresh_key = 0
-
 if "bf_running" not in st.session_state:
     st.session_state.bf_running = False
 if "bf_segments" not in st.session_state:
     st.session_state.bf_segments = []
 
 
-# =========================================================
-# Load data
-# =========================================================
+def refresh():
+    st.session_state.refresh_key += 1
+    st.cache_data.clear()
+    st.rerun()
+
+
 cfg = load_config(st.session_state.refresh_key)
 baby_name = cfg.get("baby_name", "Baby Girl").strip() or "Baby Girl"
 baby_dob = cfg.get("baby_dob", "").strip()
 
-# night defaults
+
 def parse_hhmm(s: str, default_t: time) -> time:
     try:
         s = (s or "").strip()
@@ -484,6 +591,7 @@ def parse_hhmm(s: str, default_t: time) -> time:
     except Exception:
         return default_t
 
+
 night_start = parse_hhmm(cfg.get("night_start", "22:00"), time(22, 0))
 night_end = parse_hhmm(cfg.get("night_end", "06:00"), time(6, 0))
 
@@ -491,30 +599,18 @@ df_all = ws_read_log(st.session_state.refresh_key)
 
 
 # =========================================================
-# Always available lock, top
+# Header + always lock
 # =========================================================
-st.markdown("<div class='container'>", unsafe_allow_html=True)
+st.markdown("<div class='hub'>", unsafe_allow_html=True)
 
-topA, topB = st.columns([1, 1])
-with topA:
-    st.markdown(f"<div class='title'>👶🏻 {baby_name}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtle'>Mobile first logging, syncs across iPhone and Mac</div>", unsafe_allow_html=True)
-with topB:
-    if st.button("🔒 Lock", use_container_width=True):
+h1, h2 = st.columns([3, 1])
+with h1:
+    st.markdown(f"<div class='appTitle'>👶🏻 {baby_name}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtle'>Tap to log. Syncs across iPhone and Mac.</div>", unsafe_allow_html=True)
+with h2:
+    if st.button("🔒 Lock", use_container_width=True, key="lock_top_btn"):
         st.session_state.authenticated = False
         st.rerun()
-
-st.write("")
-
-# =========================================================
-# Navigation (keeps your UI vibe)
-# =========================================================
-nav = st.radio(
-    "Navigation",
-    ["Home", "Feed", "Diaper", "Growth", "Insights", "More", "History"],
-    horizontal=True,
-    label_visibility="collapsed",
-)
 
 st.write("")
 
@@ -538,6 +634,13 @@ if nav == "Home":
     breast_min = int(breast["duration_min"].fillna(0).sum()) if len(breast) else 0
 
     st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<div class='badgeRow'>", unsafe_allow_html=True)
+    st.markdown("<span class='badge pink'>👧 Baby girl</span>", unsafe_allow_html=True)
+    st.markdown("<span class='badge blue'>📱 iPhone first</span>", unsafe_allow_html=True)
+    st.markdown("<span class='badge lav'>☁️ Cloud synced</span>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.write("")
+
     st.markdown("<div class='kpiGrid2'>", unsafe_allow_html=True)
     kpi_block("Since last feed", time_ago(last_feed))
     kpi_block("Since last diaper", time_ago(last_diaper))
@@ -556,7 +659,7 @@ if nav == "Home":
     st.subheader("Quick actions")
     c1, c2, c3 = st.columns(3)
     with c1:
-        if st.button("🍼 Bottle 15", use_container_width=True):
+        if st.button("🍼 15", use_container_width=True, key="home_b15"):
             row = base_row(now_floor())
             row["event_type"] = "feed"
             row["feed_method"] = "bottle"
@@ -565,7 +668,7 @@ if nav == "Home":
             st.toast("Bottle 15 logged", icon="✅")
             refresh()
     with c2:
-        if st.button("🍼 Bottle 30", use_container_width=True):
+        if st.button("🍼 30", use_container_width=True, key="home_b30"):
             row = base_row(now_floor())
             row["event_type"] = "feed"
             row["feed_method"] = "bottle"
@@ -574,14 +677,14 @@ if nav == "Home":
             st.toast("Bottle 30 logged", icon="✅")
             refresh()
     with c3:
-        if st.button("💧 Wet diaper", use_container_width=True):
+        if st.button("💧 Wet", use_container_width=True, key="home_wet"):
             row = base_row(now_floor())
             row["event_type"] = "diaper"
             row["diaper_type"] = "wet"
             ws_append_log(row)
             st.toast("Wet logged", icon="✅")
             refresh()
-    st.caption("If you need to edit or delete, use History.")
+    st.caption("Edit or delete any mistake in Tools > History.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -604,7 +707,7 @@ if nav == "Home":
 elif nav == "Feed":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🍼 Feeding")
-    mode = st.radio("Mode", ["Bottle", "Breast timer"], horizontal=True, label_visibility="collapsed")
+    mode = st.radio("Mode", ["Bottle", "Breast timer"], horizontal=True, label_visibility="collapsed", key="feed_mode")
     st.markdown("</div>", unsafe_allow_html=True)
 
     if mode == "Bottle":
@@ -612,7 +715,7 @@ elif nav == "Feed":
         st.subheader("Quick bottle")
         g1 = st.columns(3)
         with g1[0]:
-            if st.button("15 ml", use_container_width=True):
+            if st.button("15 ml", use_container_width=True, key="feed_b15"):
                 row = base_row(now_floor())
                 row["event_type"] = "feed"
                 row["feed_method"] = "bottle"
@@ -621,7 +724,7 @@ elif nav == "Feed":
                 st.toast("Bottle 15 logged", icon="✅")
                 refresh()
         with g1[1]:
-            if st.button("30 ml", use_container_width=True):
+            if st.button("30 ml", use_container_width=True, key="feed_b30"):
                 row = base_row(now_floor())
                 row["event_type"] = "feed"
                 row["feed_method"] = "bottle"
@@ -630,8 +733,8 @@ elif nav == "Feed":
                 st.toast("Bottle 30 logged", icon="✅")
                 refresh()
         with g1[2]:
-            ml = st.number_input("Custom ml", min_value=0, max_value=300, value=0, step=5)
-            if st.button("Log custom", use_container_width=True, disabled=(ml <= 0)):
+            ml = st.number_input("Custom ml", min_value=0, max_value=300, value=0, step=5, key="feed_custom_ml")
+            if st.button("Log", use_container_width=True, disabled=(ml <= 0), key="feed_log_custom"):
                 row = base_row(now_floor())
                 row["event_type"] = "feed"
                 row["feed_method"] = "bottle"
@@ -639,6 +742,7 @@ elif nav == "Feed":
                 ws_append_log(row)
                 st.toast(f"Bottle {int(ml)} logged", icon="✅")
                 refresh()
+        st.caption("One tap logs instantly. Use Tools > History to edit or delete.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     else:
@@ -655,19 +759,19 @@ elif nav == "Feed":
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button("▶️ Start", use_container_width=True):
+            if st.button("▶️ Start", use_container_width=True, key="bf_start"):
                 if not st.session_state.bf_running:
                     st.session_state.bf_running = True
                     st.session_state.bf_segments = [{"side": "left", "start": now_floor(), "end": None}]
                     st.toast("Started on left", icon="⏱️")
                 st.rerun()
         with c2:
-            if st.button("⏹️ Stop", use_container_width=True, disabled=(not st.session_state.bf_running)):
+            if st.button("⏹️ Stop", use_container_width=True, disabled=(not st.session_state.bf_running), key="bf_stop"):
                 end_open_segment()
                 st.session_state.bf_running = False
                 st.rerun()
         with c3:
-            if st.button("🧽 Discard", use_container_width=True):
+            if st.button("🧽 Discard", use_container_width=True, key="bf_discard"):
                 st.session_state.bf_running = False
                 st.session_state.bf_segments = []
                 st.toast("Discarded", icon="🧽")
@@ -683,12 +787,12 @@ elif nav == "Feed":
 
             s1, s2 = st.columns(2)
             with s1:
-                if st.button("Switch left", use_container_width=True, disabled=(not st.session_state.bf_running)):
+                if st.button("Switch left", use_container_width=True, disabled=(not st.session_state.bf_running), key="bf_left"):
                     end_open_segment()
                     start_segment("left")
                     st.rerun()
             with s2:
-                if st.button("Switch right", use_container_width=True, disabled=(not st.session_state.bf_running)):
+                if st.button("Switch right", use_container_width=True, disabled=(not st.session_state.bf_running), key="bf_right"):
                     end_open_segment()
                     start_segment("right")
                     st.rerun()
@@ -704,10 +808,10 @@ elif nav == "Feed":
 
             st.markdown(f"**Total:** {total_min} min")
 
-            if st.toggle("Show breakdown", value=False):
+            if st.toggle("Show breakdown", value=False, key="bf_breakdown"):
                 st.dataframe(pd.DataFrame(rows), use_container_width=True, height=220)
 
-            if st.button("✅ Save breast feed", use_container_width=True, disabled=(total_min <= 0)):
+            if st.button("✅ Save breast feed", use_container_width=True, disabled=(total_min <= 0), key="bf_save"):
                 timer_end = rows[-1]["end"]
                 breakdown = ", ".join([f"{r['side'][0].upper()}:{r['min']}m {r['start']}-{r['end']}" for r in rows])
                 notes = f"Start {start_dt.strftime('%H:%M')} End {timer_end} | {breakdown}"
@@ -735,10 +839,9 @@ elif nav == "Diaper":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("💧 Diaper")
     st.caption("One tap logging")
-
     g = st.columns(3)
     with g[0]:
-        if st.button("💧 Wet", use_container_width=True):
+        if st.button("💧 Wet", use_container_width=True, key="d_wet"):
             row = base_row(now_floor())
             row["event_type"] = "diaper"
             row["diaper_type"] = "wet"
@@ -746,7 +849,7 @@ elif nav == "Diaper":
             st.toast("Wet logged", icon="✅")
             refresh()
     with g[1]:
-        if st.button("💩 Dirty", use_container_width=True):
+        if st.button("💩 Dirty", use_container_width=True, key="d_dirty"):
             row = base_row(now_floor())
             row["event_type"] = "diaper"
             row["diaper_type"] = "dirty"
@@ -754,14 +857,13 @@ elif nav == "Diaper":
             st.toast("Dirty logged", icon="✅")
             refresh()
     with g[2]:
-        if st.button("💩 Mixed", use_container_width=True):
+        if st.button("💩 Mixed", use_container_width=True, key="d_mixed"):
             row = base_row(now_floor())
             row["event_type"] = "diaper"
             row["diaper_type"] = "mixed"
             ws_append_log(row)
             st.toast("Mixed logged", icon="✅")
             refresh()
-
     st.markdown("</div>", unsafe_allow_html=True)
 
     today = datetime.now().date()
@@ -779,67 +881,12 @@ elif nav == "Diaper":
 
 
 # =========================================================
-# GROWTH
-# =========================================================
-elif nav == "Growth":
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("📈 Growth")
-    st.caption("Log weight and height, see trend")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        w = st.number_input("Weight kg", min_value=0.0, max_value=25.0, value=0.0, step=0.01, format="%.2f")
-    with c2:
-        h = st.number_input("Height cm", min_value=0.0, max_value=120.0, value=0.0, step=0.1, format="%.1f")
-
-    if st.button("✅ Log growth", use_container_width=True, disabled=(w <= 0 and h <= 0)):
-        row = base_row(now_floor())
-        row["event_type"] = "growth"
-        if w > 0:
-            row["weight_kg"] = float(w)
-        if h > 0:
-            row["height_cm"] = float(h)
-        ws_append_log(row)
-        st.toast("Growth logged", icon="✅")
-        refresh()
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    gdf = df_all[df_all["event_type"] == "growth"].copy().sort_values("datetime")
-    if len(gdf) == 0:
-        st.markdown("<div class='card'>No growth entries yet.</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("Charts")
-        chart = gdf[["datetime", "weight_kg", "height_cm"]].copy()
-        chart["date"] = chart["datetime"].dt.date
-        daily = chart.groupby("date")[["weight_kg", "height_cm"]].mean().reset_index()
-        daily = daily.rename(columns={"date": "index"}).set_index("index")
-        daily.index = pd.to_datetime(daily.index)
-
-        if daily["weight_kg"].notna().any():
-            st.caption("Weight")
-            st.line_chart(daily["weight_kg"])
-        if daily["height_cm"].notna().any():
-            st.caption("Height")
-            st.line_chart(daily["height_cm"])
-
-        if st.toggle("Show table", value=False):
-            st.dataframe(
-                gdf.sort_values("datetime", ascending=False)[["datetime", "weight_kg", "height_cm", "notes", "row_id"]],
-                use_container_width=True,
-                height=320,
-            )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================================================
 # INSIGHTS
 # =========================================================
 elif nav == "Insights":
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Insights")
-    st.caption("Trends and patterns, layered and calm. Expand only what you need.")
+    st.markdown("<div class='subtle'>Trends and patterns. Expand only what you need.</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
     if len(df_all) == 0:
@@ -851,18 +898,14 @@ elif nav == "Insights":
         last14_cut = today - timedelta(days=13)
 
         feeds_all = df_all[df_all["event_type"] == "feed"].copy().sort_values("datetime")
-        diapers_all = df_all[df_all["event_type"] == "diaper"].copy().sort_values("datetime")
         bottle_all = feeds_all[feeds_all["feed_method"] == "bottle"].copy()
-        breast_all = feeds_all[feeds_all["feed_method"] == "breast"].copy()
 
-        # Summary card
         today_df = df_all[df_all["date"] == today].copy()
         feeds_today = today_df[today_df["event_type"] == "feed"].copy()
         diapers_today = today_df[today_df["event_type"] == "diaper"].copy()
-        bottle_today = feeds_today[feeds_today["feed_method"] == "bottle"].copy()
-        breast_today = feeds_today[feeds_today["feed_method"] == "breast"].copy()
 
         last_feed = feeds_today["datetime"].max() if len(feeds_today) else pd.NaT
+
         avg_gap_min = None
         if len(feeds_all) >= 2:
             gaps = feeds_all["datetime"].diff().dt.total_seconds() / 60
@@ -878,15 +921,8 @@ elif nav == "Insights":
         kpi_block("Feeds today", str(int(len(feeds_today))))
         kpi_block("Diapers today", str(int(len(diapers_today))))
         st.markdown("</div>", unsafe_allow_html=True)
-
-        st.write("")
-        st.markdown("<div class='kpiGrid2'>", unsafe_allow_html=True)
-        kpi_block("Bottle ml today", str(int(bottle_today["volume_ml"].fillna(0).sum()) if len(bottle_today) else 0))
-        kpi_block("Breast min today", str(int(breast_today["duration_min"].fillna(0).sum()) if len(breast_today) else 0))
-        st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Expanders
         with st.expander("Peak feed times and cluster awareness", expanded=True):
             last7 = df_all[df_all["date"] >= last7_cut].copy()
             feeds7 = last7[last7["event_type"] == "feed"].copy()
@@ -898,13 +934,16 @@ elif nav == "Insights":
                 hist.columns = ["hour", "count"]
 
                 top = hist.sort_values("count", ascending=False).head(3)
-                peaks = [f"{int(r.hour):02d}:00–{(int(r.hour)+1)%24:02d}:00" for _, r in top.iterrows() if int(r["count"]) > 0]
+                peaks = [
+                    f"{int(r.hour):02d}:00–{(int(r.hour)+1)%24:02d}:00"
+                    for _, r in top.iterrows()
+                    if int(r["count"]) > 0
+                ]
                 st.markdown("**Most common feed windows (last 7 days)**")
                 st.caption(", ".join(peaks) if peaks else "Not enough data yet to identify peaks.")
                 st.caption("Feeds by hour (last 7 days)")
                 st.bar_chart(hist.rename(columns={"hour": "index"}).set_index("index")["count"])
 
-                # Cluster check in last 2h
                 window_start = now_ts - pd.Timedelta(hours=2)
                 recent2h = feeds_all[feeds_all["datetime"] >= window_start].copy()
                 if len(recent2h) >= 3:
@@ -913,366 +952,381 @@ elif nav == "Insights":
                     avg2h = float(g.mean()) if len(g) else None
                     if avg2h is not None and avg2h <= 35:
                         st.warning(f"Cluster feeding likely: {len(recent2h)} feeds in last 2h (avg gap {avg2h:.0f} min).", icon="🟣")
-                    elif avg2h is not None:
-                        st.info(f"Recent feeding: {len(recent2h)} feeds in last 2h (avg gap {avg2h:.0f} min).", icon="ℹ️")
-                else:
-                    st.caption("Cluster awareness uses last 2 hours. Log more feeds to activate it.")
 
         with st.expander("Daily trends (last 14 days)", expanded=False):
             last14 = df_all[df_all["date"] >= last14_cut].copy()
-            if len(last14) == 0:
-                st.caption("Not enough data yet.")
-            else:
-                feeds14 = last14[last14["event_type"] == "feed"].copy()
-                diapers14 = last14[last14["event_type"] == "diaper"].copy()
-                bottle14 = feeds14[feeds14["feed_method"] == "bottle"].copy()
+            feeds14 = last14[last14["event_type"] == "feed"].copy()
+            diapers14 = last14[last14["event_type"] == "diaper"].copy()
+            bottle14 = feeds14[feeds14["feed_method"] == "bottle"].copy()
 
-                feeds_by_day = feeds14.groupby("date").size().rename("feeds")
-                diapers_by_day = diapers14.groupby("date").size().rename("diapers")
-                bottle_ml_by_day = bottle14.groupby("date")["volume_ml"].sum().rename("bottle_ml")
+            feeds_by_day = feeds14.groupby("date").size().rename("feeds")
+            diapers_by_day = diapers14.groupby("date").size().rename("diapers")
+            bottle_ml_by_day = bottle14.groupby("date")["volume_ml"].sum().rename("bottle_ml")
 
-                idx = sorted(last14["date"].unique())
-                daily = pd.DataFrame(index=idx)
-                daily = daily.join(feeds_by_day, how="left").join(diapers_by_day, how="left").join(bottle_ml_by_day, how="left").fillna(0)
-                daily.index = pd.to_datetime(daily.index)
+            idx = sorted(last14["date"].unique())
+            daily = pd.DataFrame(index=idx)
+            daily = daily.join(feeds_by_day, how="left").join(diapers_by_day, how="left").join(bottle_ml_by_day, how="left").fillna(0)
+            daily.index = pd.to_datetime(daily.index)
 
-                st.caption("Feeds and diapers per day")
-                st.line_chart(daily[["feeds", "diapers"]])
+            st.caption("Feeds and diapers per day")
+            st.line_chart(daily[["feeds", "diapers"]])
 
-                st.caption("Bottle ml per day")
-                st.line_chart(daily[["bottle_ml"]])
+            st.caption("Bottle ml per day")
+            st.line_chart(daily[["bottle_ml"]])
 
-        with st.expander("Night vs day split", expanded=False):
-            if len(bottle_all) == 0:
-                st.caption("No bottle feeds logged yet.")
-            else:
-                b = bottle_all.copy()
-                b["is_night"] = b["datetime"].apply(lambda x: within_night(x, night_start, night_end))
-                night_total = int(b[b["is_night"]]["volume_ml"].fillna(0).sum())
-                day_total = int(b[~b["is_night"]]["volume_ml"].fillna(0).sum())
-
-                st.markdown("<div class='kpiGrid2'>", unsafe_allow_html=True)
-                kpi_block("Night bottle ml", str(night_total))
-                kpi_block("Day bottle ml", str(day_total))
-                st.markdown("</div>", unsafe_allow_html=True)
-
-                last7 = df_all[df_all["date"] >= last7_cut].copy()
-                b7 = last7[(last7["event_type"] == "feed") & (last7["feed_method"] == "bottle")].copy()
-                if len(b7):
-                    b7["is_night"] = b7["datetime"].apply(lambda x: within_night(x, night_start, night_end))
-                    by_day = b7.groupby(["date", "is_night"])["volume_ml"].sum().reset_index()
-                    pivot = by_day.pivot(index="date", columns="is_night", values="volume_ml").fillna(0)
-                    pivot.columns = ["Day" if c is False else "Night" for c in pivot.columns]
-                    pivot.index = pd.to_datetime(pivot.index)
-                    st.caption("Bottle ml trend (last 7 days)")
-                    st.line_chart(pivot)
-
-        with st.expander("Feed gaps", expanded=False):
-            if len(feeds_all) < 2:
-                st.caption("Not enough feeds yet.")
-            else:
-                feeds_view = feeds_all[["datetime", "feed_method", "volume_ml", "duration_min", "side", "notes", "row_id"]].copy()
-                feeds_view["gap_min"] = feeds_view["datetime"].diff().dt.total_seconds() / 60
-                st.caption("Most recent feed gaps")
-                st.dataframe(feeds_view.sort_values("datetime", ascending=False).head(30), use_container_width=True, height=360)
-
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("Insights settings")
-        st.caption("These save to Google Sheets and sync across devices.")
-        c1, c2 = st.columns(2)
-        with c1:
-            ns = st.time_input("Night starts", value=night_start)
-        with c2:
-            ne = st.time_input("Night ends", value=night_end)
-        if st.button("Save insight settings", use_container_width=True):
-            save_config_value("night_start", ns.strftime("%H:%M"))
-            save_config_value("night_end", ne.strftime("%H:%M"))
-            st.toast("Saved", icon="✅")
-            refresh()
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================================================
-# MORE
-# =========================================================
-elif nav == "More":
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("More")
-    st.caption("Baby profile, immunisation, milestones, medication, journal")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    with st.expander("Baby profile (syncs across iPhone and Mac)", expanded=True):
-        new_name = st.text_input("Baby name", value=baby_name)
-        new_dob = st.text_input("DOB (YYYY-MM-DD)", value=baby_dob, placeholder="e.g. 2026-01-10")
-        if st.button("Save profile", use_container_width=True):
-            save_config_value("baby_name", new_name.strip() or "Baby Girl")
-            save_config_value("baby_dob", new_dob.strip())
-            st.toast("Saved", icon="✅")
-            refresh()
-
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    choice = st.radio("Section", ["Immunisation", "Milestones", "Medication", "Journal"], horizontal=True, label_visibility="collapsed")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if choice == "Immunisation":
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("💉 Immunisation")
-        vname = st.text_input("Vaccine name", placeholder="e.g. 8 week vaccines")
-        given = st.date_input("Given date", value=datetime.now().date())
-        notes = st.text_input("Notes (optional)", placeholder="Batch, site, reaction, etc")
-        if st.button("✅ Save vaccine", use_container_width=True, disabled=(not vname.strip())):
-            row = base_row(make_dt(given, now_floor().time()))
-            row["event_type"] = "immunisation"
-            row["title"] = vname.strip()
-            row["notes"] = notes
-            ws_append_log(row)
-            st.toast("Immunisation saved", icon="✅")
-            refresh()
-
-        vdf = df_all[df_all["event_type"] == "immunisation"].sort_values("datetime", ascending=False).head(25)
-        if len(vdf):
-            st.caption("Recent immunisations")
-            for _, r in vdf.iterrows():
-                st.markdown(f"**{timeline_label(r)}**")
-                n = safe_str(r.get("notes")).strip()
-                if n:
-                    st.caption(n)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if choice == "Milestones":
-        DEFAULT = [
-            "First smile",
-            "Holds head up",
-            "Rolls over",
-            "First laugh",
-            "Grasps objects",
-            "Sits without support",
-            "Crawls",
-            "Stands with support",
-            "First steps",
-        ]
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("✨ Milestones")
-        st.caption("Tap to log with timestamp")
-        cols = st.columns(2)
-        for i, m in enumerate(DEFAULT):
-            with cols[i % 2]:
-                if st.button(m, use_container_width=True):
-                    row = base_row(now_floor())
-                    row["event_type"] = "milestone"
-                    row["title"] = m
-                    ws_append_log(row)
-                    st.toast("Milestone saved", icon="✅")
-                    refresh()
-
-        st.write("")
-        custom = st.text_input("Custom milestone", placeholder="Type a milestone you want to log")
-        if st.button("✅ Save custom milestone", use_container_width=True, disabled=(not custom.strip())):
-            row = base_row(now_floor())
-            row["event_type"] = "milestone"
-            row["title"] = custom.strip()
-            ws_append_log(row)
-            st.toast("Milestone saved", icon="✅")
-            refresh()
-
-        mdf = df_all[df_all["event_type"] == "milestone"].sort_values("datetime", ascending=False).head(25)
-        if len(mdf):
-            st.caption("Recent milestones")
-            for _, r in mdf.iterrows():
-                st.markdown(f"**{timeline_label(r)}**")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if choice == "Medication":
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("💊 Medication")
-        med = st.text_input("Medication name", placeholder="e.g. Vitamin D drops")
-        dose = st.text_input("Dose (optional)", placeholder="e.g. 0.3ml")
-        notes = st.text_input("Notes (optional)", placeholder="e.g. after feed")
-        if st.button("✅ Save medication", use_container_width=True, disabled=(not med.strip())):
-            row = base_row(now_floor())
-            row["event_type"] = "medication"
-            row["title"] = med.strip()
-            row["notes"] = (dose.strip() + " " + notes.strip()).strip()
-            ws_append_log(row)
-            st.toast("Medication saved", icon="✅")
-            refresh()
-
-        mdf = df_all[df_all["event_type"] == "medication"].sort_values("datetime", ascending=False).head(25)
-        if len(mdf):
-            st.caption("Recent medication")
-            for _, r in mdf.iterrows():
-                st.markdown(f"**{timeline_label(r)}**")
-                n = safe_str(r.get("notes")).strip()
-                if n:
-                    st.caption(n)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if choice == "Journal":
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("📝 Journal")
-        mood = st.radio("Mood", ["😊", "😴", "😢", "🤒", "😍", "🥳"], horizontal=True)
-        title = st.text_input("Title", placeholder="e.g. First long sleep")
-        text = st.text_area("Entry", height=140, placeholder="Write a quick note…")
-        if st.button("✅ Save entry", use_container_width=True, disabled=(not title.strip() and not text.strip())):
-            row = base_row(now_floor())
-            row["event_type"] = "journal"
-            row["mood"] = mood
-            row["title"] = title.strip()
-            row["notes"] = text.strip()
-            ws_append_log(row)
-            st.toast("Journal saved", icon="✅")
-            refresh()
-
-        jdf = df_all[df_all["event_type"] == "journal"].sort_values("datetime", ascending=False).head(20)
-        if len(jdf):
-            st.caption("Recent entries")
-            for _, r in jdf.iterrows():
-                st.markdown(f"**{timeline_label(r)}**")
-                st.caption(safe_str(r.get("notes")).strip()[:160])
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
-# =========================================================
-# HISTORY
-# =========================================================
-elif nav == "History":
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("History")
-    st.caption("Filter, edit, or delete any entry")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if len(df_all) == 0:
-        st.markdown("<div class='card'>No entries yet.</div>", unsafe_allow_html=True)
-    else:
-        day = st.date_input("Day", value=datetime.now().date())
-        types = st.multiselect(
-            "Types",
-            ["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"],
-            default=["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"],
-        )
-        view = df_all[df_all["date"] == day].copy()
-        if types:
-            view = view[view["event_type"].isin(types)]
-        view = view.sort_values("datetime", ascending=False)
-
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        if len(view) == 0:
-            st.caption("No entries for this day.")
-        else:
-            for _, r in view.head(30).iterrows():
-                st.markdown(f"**{timeline_label(r)}**")
-                n = safe_str(r.get("notes")).strip()
-                if n:
-                    st.caption(n)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("Edit or delete")
-        recent = df_all.sort_values("datetime", ascending=False).head(500).copy()
-        recent["pick"] = recent.apply(lambda x: f"{x['datetime'].strftime('%Y-%m-%d %H:%M')} | {timeline_label(x)}", axis=1)
-        pick = st.selectbox("Pick an entry", recent["pick"].tolist())
-        row0 = recent[recent["pick"] == pick].iloc[0]
-        rid = safe_str(row0.get("row_id")).strip()
-
-        dt0 = row0["datetime"].to_pydatetime()
-        d0 = dt0.date()
-        t0 = dt0.time().replace(second=0, microsecond=0)
-        et0 = safe_lower(row0.get("event_type"))
-
-        with st.form("edit_form"):
+        with st.expander("Insights settings (syncs)", expanded=False):
             c1, c2 = st.columns(2)
             with c1:
-                nd = st.date_input("Date", value=d0)
+                ns = st.time_input("Night starts", value=night_start, key="ins_night_start")
             with c2:
-                nt = st.time_input("Time", value=t0)
-
-            et = st.selectbox("Event type", ["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"],
-                              index=["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"].index(et0) if et0 in ["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"] else 0)
-
-            title = st.text_input("Title", value=safe_str(row0.get("title")))
-            mood = st.text_input("Mood", value=safe_str(row0.get("mood")))
-            notes = st.text_input("Notes", value=safe_str(row0.get("notes")))
-
-            feed_method = safe_lower(row0.get("feed_method"))
-            side = safe_lower(row0.get("side"))
-            diaper_type = safe_lower(row0.get("diaper_type"))
-            volume = float(row0.get("volume_ml")) if not is_missing(row0.get("volume_ml")) else 0.0
-            duration = float(row0.get("duration_min")) if not is_missing(row0.get("duration_min")) else 0.0
-            weight = float(row0.get("weight_kg")) if not is_missing(row0.get("weight_kg")) else 0.0
-            height = float(row0.get("height_cm")) if not is_missing(row0.get("height_cm")) else 0.0
-
-            if et == "feed":
-                feed_method = st.selectbox("Feed method", ["bottle", "breast"], index=0 if feed_method != "breast" else 1)
-                if feed_method == "bottle":
-                    volume = st.number_input("Bottle ml", 0.0, 300.0, float(volume), step=5.0)
-                else:
-                    side = st.selectbox("Side", ["left", "right"], index=0 if side != "right" else 1)
-                    duration = st.number_input("Duration min", 0.0, 240.0, float(duration), step=1.0)
-
-            if et == "diaper":
-                diaper_type = st.selectbox("Diaper type", ["wet", "dirty", "mixed"], index=["wet", "dirty", "mixed"].index(diaper_type) if diaper_type in ["wet", "dirty", "mixed"] else 0)
-
-            if et == "growth":
-                weight = st.number_input("Weight kg", 0.0, 25.0, float(weight), step=0.01, format="%.2f")
-                height = st.number_input("Height cm", 0.0, 120.0, float(height), step=0.1, format="%.1f")
-
-            save = st.form_submit_button("Save changes", use_container_width=True)
-
-        if save:
-            new_dt = make_dt(nd, nt)
-            upd = base_row(new_dt)
-            upd["row_id"] = rid
-            upd["event_type"] = et
-            upd["title"] = title
-            upd["mood"] = mood
-            upd["notes"] = notes
-
-            if et == "feed":
-                upd["feed_method"] = feed_method
-                if feed_method == "bottle":
-                    upd["volume_ml"] = int(volume)
-                else:
-                    upd["side"] = side
-                    upd["duration_min"] = int(duration)
-
-            if et == "diaper":
-                upd["diaper_type"] = diaper_type
-
-            if et == "growth":
-                if weight > 0:
-                    upd["weight_kg"] = float(weight)
-                if height > 0:
-                    upd["height_cm"] = float(height)
-
-            ok = ws_update_log(rid, upd)
-            if ok:
-                st.toast("Updated", icon="✅")
+                ne = st.time_input("Night ends", value=night_end, key="ins_night_end")
+            if st.button("Save", use_container_width=True, key="ins_save"):
+                save_config_value("night_start", ns.strftime("%H:%M"))
+                save_config_value("night_end", ne.strftime("%H:%M"))
+                st.toast("Saved", icon="✅")
                 refresh()
-            else:
-                st.error("Could not update row. row_id not found.")
-
-        if st.button("🗑️ Delete entry", use_container_width=True, type="secondary"):
-            ok = ws_delete_log(rid)
-            if ok:
-                st.toast("Deleted", icon="🗑️")
-                refresh()
-            else:
-                st.error("Could not delete row. row_id not found.")
-
-        st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =========================================================
-# Bottom controls
+# MORE (Main / Growth / History)
+# =========================================================
+elif nav == "More":
+    # Tools bar
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Tools")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("<a class='navItem' href='?tab=More&section=Growth'>📈 Growth</a>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<a class='navItem' href='?tab=More&section=History'>🧾 History</a>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if more_section == "Growth":
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.subheader("📈 Growth")
+        st.caption("Log weight and height, see trend")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            w = st.number_input("Weight kg", min_value=0.0, max_value=25.0, value=0.0, step=0.01, format="%.2f", key="g_w")
+        with c2:
+            h = st.number_input("Height cm", min_value=0.0, max_value=120.0, value=0.0, step=0.1, format="%.1f", key="g_h")
+
+        if st.button("✅ Log growth", use_container_width=True, disabled=(w <= 0 and h <= 0), key="g_save"):
+            row = base_row(now_floor())
+            row["event_type"] = "growth"
+            if w > 0:
+                row["weight_kg"] = float(w)
+            if h > 0:
+                row["height_cm"] = float(h)
+            ws_append_log(row)
+            st.toast("Growth logged", icon="✅")
+            refresh()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        gdf = df_all[df_all["event_type"] == "growth"].copy().sort_values("datetime")
+        if len(gdf) == 0:
+            st.markdown("<div class='card'>No growth entries yet.</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.subheader("Charts")
+            chart = gdf[["datetime", "weight_kg", "height_cm"]].copy()
+            chart["date"] = chart["datetime"].dt.date
+            daily = chart.groupby("date")[["weight_kg", "height_cm"]].mean().reset_index()
+            daily = daily.rename(columns={"date": "index"}).set_index("index")
+            daily.index = pd.to_datetime(daily.index)
+
+            if daily["weight_kg"].notna().any():
+                st.caption("Weight")
+                st.line_chart(daily["weight_kg"])
+            if daily["height_cm"].notna().any():
+                st.caption("Height")
+                st.line_chart(daily["height_cm"])
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<a class='navItem' href='?tab=More&section=Main'>⬅ Back to More</a>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    elif more_section == "History":
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.subheader("🧾 History")
+        st.caption("Filter, edit, or delete any entry")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        if len(df_all) == 0:
+            st.markdown("<div class='card'>No entries yet.</div>", unsafe_allow_html=True)
+        else:
+            day = st.date_input("Day", value=datetime.now().date(), key="hist_day")
+            types = st.multiselect(
+                "Types",
+                ["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"],
+                default=["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"],
+                key="hist_types",
+            )
+            view = df_all[df_all["date"] == day].copy()
+            if types:
+                view = view[view["event_type"].isin(types)]
+            view = view.sort_values("datetime", ascending=False)
+
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            if len(view) == 0:
+                st.caption("No entries for this day.")
+            else:
+                for _, r in view.head(30).iterrows():
+                    st.markdown(f"**{timeline_label(r)}**")
+                    n = safe_str(r.get("notes")).strip()
+                    if n:
+                        st.caption(n)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.subheader("Edit or delete")
+            recent = df_all.sort_values("datetime", ascending=False).head(500).copy()
+            recent["pick"] = recent.apply(lambda x: f"{x['datetime'].strftime('%Y-%m-%d %H:%M')} | {timeline_label(x)}", axis=1)
+            pick = st.selectbox("Pick an entry", recent["pick"].tolist(), key="hist_pick")
+            row0 = recent[recent["pick"] == pick].iloc[0]
+            rid = safe_str(row0.get("row_id")).strip()
+
+            dt0 = row0["datetime"].to_pydatetime()
+            d0 = dt0.date()
+            t0 = dt0.time().replace(second=0, microsecond=0)
+            et0 = safe_lower(row0.get("event_type"))
+
+            with st.form("edit_form"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    nd = st.date_input("Date", value=d0, key="edit_date")
+                with c2:
+                    nt = st.time_input("Time", value=t0, key="edit_time")
+
+                et = st.selectbox(
+                    "Event type",
+                    ["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"],
+                    index=["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"].index(et0)
+                    if et0 in ["feed", "diaper", "growth", "immunisation", "milestone", "medication", "journal"]
+                    else 0,
+                    key="edit_event_type",
+                )
+
+                title = st.text_input("Title", value=safe_str(row0.get("title")), key="edit_title")
+                mood = st.text_input("Mood", value=safe_str(row0.get("mood")), key="edit_mood")
+                notes = st.text_input("Notes", value=safe_str(row0.get("notes")), key="edit_notes")
+
+                feed_method = safe_lower(row0.get("feed_method"))
+                side = safe_lower(row0.get("side"))
+                diaper_type = safe_lower(row0.get("diaper_type"))
+                volume = float(row0.get("volume_ml")) if not is_missing(row0.get("volume_ml")) else 0.0
+                duration = float(row0.get("duration_min")) if not is_missing(row0.get("duration_min")) else 0.0
+                weight = float(row0.get("weight_kg")) if not is_missing(row0.get("weight_kg")) else 0.0
+                height = float(row0.get("height_cm")) if not is_missing(row0.get("height_cm")) else 0.0
+
+                if et == "feed":
+                    feed_method = st.selectbox("Feed method", ["bottle", "breast"], index=0 if feed_method != "breast" else 1, key="edit_feed_method")
+                    if feed_method == "bottle":
+                        volume = st.number_input("Bottle ml", 0.0, 300.0, float(volume), step=5.0, key="edit_volume")
+                    else:
+                        side = st.selectbox("Side", ["left", "right"], index=0 if side != "right" else 1, key="edit_side")
+                        duration = st.number_input("Duration min", 0.0, 240.0, float(duration), step=1.0, key="edit_duration")
+
+                if et == "diaper":
+                    diaper_type = st.selectbox("Diaper type", ["wet", "dirty", "mixed"], index=["wet", "dirty", "mixed"].index(diaper_type) if diaper_type in ["wet", "dirty", "mixed"] else 0, key="edit_diaper")
+
+                if et == "growth":
+                    weight = st.number_input("Weight kg", 0.0, 25.0, float(weight), step=0.01, format="%.2f", key="edit_weight")
+                    height = st.number_input("Height cm", 0.0, 120.0, float(height), step=0.1, format="%.1f", key="edit_height")
+
+                save = st.form_submit_button("Save changes", use_container_width=True)
+
+            if save:
+                new_dt = make_dt(nd, nt)
+                upd = base_row(new_dt)
+                upd["row_id"] = rid
+                upd["event_type"] = et
+                upd["title"] = title
+                upd["mood"] = mood
+                upd["notes"] = notes
+
+                if et == "feed":
+                    upd["feed_method"] = feed_method
+                    if feed_method == "bottle":
+                        upd["volume_ml"] = int(volume)
+                    else:
+                        upd["side"] = side
+                        upd["duration_min"] = int(duration)
+
+                if et == "diaper":
+                    upd["diaper_type"] = diaper_type
+
+                if et == "growth":
+                    if weight > 0:
+                        upd["weight_kg"] = float(weight)
+                    if height > 0:
+                        upd["height_cm"] = float(height)
+
+                ok = ws_update_log(rid, upd)
+                if ok:
+                    st.toast("Updated", icon="✅")
+                    refresh()
+                else:
+                    st.error("Could not update row. row_id not found.")
+
+            if st.button("🗑️ Delete entry", use_container_width=True, type="secondary", key="hist_delete"):
+                ok = ws_delete_log(rid)
+                if ok:
+                    st.toast("Deleted", icon="🗑️")
+                    refresh()
+                else:
+                    st.error("Could not delete row. row_id not found.")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<a class='navItem' href='?tab=More&section=Main'>⬅ Back to More</a>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    else:
+        # Main More
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.subheader("More")
+        st.markdown("<div class='subtle'>Profile, immunisation, milestones, medication, journal</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        with st.expander("Baby profile (syncs)", expanded=True):
+            new_name = st.text_input("Baby name", value=baby_name, key="profile_name")
+            new_dob = st.text_input("DOB (YYYY-MM-DD)", value=baby_dob, placeholder="e.g. 2026-01-10", key="profile_dob")
+            if st.button("Save profile", use_container_width=True, key="profile_save"):
+                save_config_value("baby_name", new_name.strip() or "Baby Girl")
+                save_config_value("baby_dob", new_dob.strip())
+                st.toast("Saved", icon="✅")
+                refresh()
+
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        choice = st.radio(
+            "Section",
+            ["Immunisation", "Milestones", "Medication", "Journal"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="more_section_main",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        if choice == "Immunisation":
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.subheader("💉 Immunisation")
+            vname = st.text_input("Vaccine name", placeholder="e.g. 8 week vaccines", key="imm_name")
+            given = st.date_input("Given date", value=datetime.now().date(), key="imm_date")
+            notes = st.text_input("Notes (optional)", placeholder="Batch, site, reaction, etc", key="imm_notes")
+            if st.button("✅ Save vaccine", use_container_width=True, disabled=(not vname.strip()), key="imm_save"):
+                row = base_row(make_dt(given, now_floor().time()))
+                row["event_type"] = "immunisation"
+                row["title"] = vname.strip()
+                row["notes"] = notes
+                ws_append_log(row)
+                st.toast("Immunisation saved", icon="✅")
+                refresh()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if choice == "Milestones":
+            DEFAULT = [
+                "First smile",
+                "Holds head up",
+                "Rolls over",
+                "First laugh",
+                "Grasps objects",
+                "Sits without support",
+                "Crawls",
+                "Stands with support",
+                "First steps",
+            ]
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.subheader("✨ Milestones")
+            st.caption("Tap to log with timestamp")
+            cols = st.columns(2)
+            for i, m in enumerate(DEFAULT):
+                with cols[i % 2]:
+                    if st.button(m, use_container_width=True, key=f"ms_{i}"):
+                        row = base_row(now_floor())
+                        row["event_type"] = "milestone"
+                        row["title"] = m
+                        ws_append_log(row)
+                        st.toast("Milestone saved", icon="✅")
+                        refresh()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if choice == "Medication":
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.subheader("💊 Medication")
+            med = st.text_input("Medication name", placeholder="e.g. Vitamin D drops", key="med_name")
+            dose = st.text_input("Dose (optional)", placeholder="e.g. 0.3ml", key="med_dose")
+            notes = st.text_input("Notes (optional)", placeholder="e.g. after feed", key="med_notes")
+            if st.button("✅ Save medication", use_container_width=True, disabled=(not med.strip()), key="med_save"):
+                row = base_row(now_floor())
+                row["event_type"] = "medication"
+                row["title"] = med.strip()
+                row["notes"] = (dose.strip() + " " + notes.strip()).strip()
+                ws_append_log(row)
+                st.toast("Medication saved", icon="✅")
+                refresh()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        if choice == "Journal":
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.subheader("📝 Journal")
+            mood = st.radio("Mood", ["😊", "😴", "😢", "🤒", "😍", "🥳"], horizontal=True, key="j_mood")
+            title = st.text_input("Title", placeholder="e.g. First long sleep", key="j_title")
+            text = st.text_area("Entry", height=140, placeholder="Write a quick note…", key="j_text")
+            if st.button("✅ Save entry", use_container_width=True, disabled=(not title.strip() and not text.strip()), key="j_save"):
+                row = base_row(now_floor())
+                row["event_type"] = "journal"
+                row["mood"] = mood
+                row["title"] = title.strip()
+                row["notes"] = text.strip()
+                ws_append_log(row)
+                st.toast("Journal saved", icon="✅")
+                refresh()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =========================================================
+# Bottom actions
 # =========================================================
 st.write("")
 b1, b2 = st.columns(2)
 with b1:
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("🔄 Refresh", use_container_width=True, key="refresh_bottom_btn"):
         refresh()
 with b2:
-    if st.button("🔒 Lock", use_container_width=True):
+    if st.button("🔒 Lock", use_container_width=True, key="lock_bottom_btn"):
         st.session_state.authenticated = False
         st.rerun()
+
+
+# =========================================================
+# Fixed bottom nav (HTML)
+# =========================================================
+def bottom_nav(active_tab: str):
+    items = [
+        ("Home", "🏠"),
+        ("Feed", "🍼"),
+        ("Diaper", "💧"),
+        ("Insights", "✨"),
+        ("More", "🧸"),
+    ]
+    links = []
+    for name, icon in items:
+        cls = "navItem navItemActive" if name == active_tab else "navItem"
+        links.append(f"<a class='{cls}' href='?tab={name}'>{icon} {name}</a>")
+    st.markdown(
+        "<div class='bottomNav'><div class='bottomNavInner'>"
+        + "".join(links)
+        + "</div></div>",
+        unsafe_allow_html=True,
+    )
+
+
+bottom_nav(nav)
 
 st.markdown("</div>", unsafe_allow_html=True)
